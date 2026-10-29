@@ -4,7 +4,10 @@ import { navigate } from '../lib/route.js';
 import { useServerEvents } from '../lib/events.js';
 import { useSettings, updateSettings, getSettings, HINT_MODES, HINT_MODE_LABELS, RU_MODES, RU_MODE_LABELS } from '../lib/settings.js';
 import { useSavedKeys, isTokenSaved, phraseTokenSet } from '../lib/vocab.js';
-import { speakSentence, speakText, useSpeakingId } from '../lib/tts.js';
+import {
+  speakSentence, speakText, useSpeakingId, useAudiobook, startAudiobook, pauseAudiobook, resumeAudiobook,
+  seekAudiobook, jumpAudiobook, stopAudiobook, updateAudiobookSentences,
+} from '../lib/tts.js';
 import WordCard from './WordCard.jsx';
 import SelectionPopover from './SelectionPopover.jsx';
 import QueueStatus from './QueueStatus.jsx';
@@ -109,6 +112,8 @@ export default function Reader({ param }) {
   const speakingId = useSpeakingId();
   const chapterRef = useRef(null);
   chapterRef.current = chapter;
+  const ab = useAudiobook();
+  const continueAudiobook = useRef(false);
   const scrollTarget = useRef(null); // номер предложения, к которому прокрутить после загрузки главы
   const topSentence = useRef(0);
   const refetchTimer = useRef(null);
@@ -155,6 +160,15 @@ export default function Reader({ param }) {
     loadChapter(chapterIdx).catch((e) => setError(e.message));
     api.put(`/api/books/${bookId}/position`, { chapter: chapterIdx, sentence: scrollTarget.current ?? 0 }).catch(() => {});
   }, [chapterIdx, bookId, loadChapter]);
+
+  useEffect(() => {
+    if (!chapter) return;
+    if (continueAudiobook.current) { continueAudiobook.current = false; startBook(0); }
+    else updateAudiobookSentences(chapter.sentences);
+  }, [chapter]); // eslint-disable-line react-hooks/exhaustive-deps
+
+  // Уход из читалки останавливает аудиокнигу.
+  useEffect(() => () => stopAudiobook(), []);
 
   // Прокрутка к нужному предложению, когда глава отрисована.
   useEffect(() => {
@@ -213,6 +227,9 @@ export default function Reader({ param }) {
       if (k === 'h' || k === 'р') { e.preventDefault(); cycleHintMode(); }
       else if (k === 't' || k === 'е') { e.preventDefault(); toggleRuColumn(); }
       else if (e.key === 'Escape') { setTapped(null); setTocOpen(false); setCard(null); }
+      else if (k === 'a' || k === 'ф') { e.preventDefault(); toggleAudiobook(); }
+      else if (ab.active && e.key === 'ArrowDown' && e.shiftKey) { e.preventDefault(); seekAudiobook(1); }
+      else if (ab.active && e.key === 'ArrowUp' && e.shiftKey) { e.preventDefault(); seekAudiobook(-1); }
       else if (e.altKey && e.key === 'ArrowRight') goChapter(1);
       else if (e.altKey && e.key === 'ArrowLeft') goChapter(-1);
     };
@@ -255,7 +272,37 @@ export default function Reader({ param }) {
     speakText(t.en, { id: `tok-${s.id}`, lang: book?.lang || 'en' });
     setCard({ sentence: s, token: t });
   }, [book?.lang]);
-  const onPlay = useCallback((s) => speakSentence(s, { id: `sent-${s.id}`, lang: book?.lang || 'en' }), [book?.lang]);
+  const onPlay = useCallback((s) => {
+    // В режиме аудиокниги клик по предложению переносит чтение туда; иначе — одно предложение.
+    if (ab.active) jumpAudiobook(s.idx);
+    else speakSentence(s, { id: `sent-${s.id}`, lang: book?.lang || 'en' });
+  }, [book?.lang, ab.active]);
+
+  const scrollIntoViewIfNeeded = (idx) => {
+    const el = document.querySelector(`.rows [data-index="${idx}"]`);
+    if (!el) return;
+    const r = el.getBoundingClientRect();
+    if (r.top < 110 || r.bottom > window.innerHeight - 20) el.scrollIntoView({ block: 'center', behavior: 'smooth' });
+  };
+  const startBook = (from) => {
+    const c = chapterRef.current;
+    if (!c) return;
+    startAudiobook({
+      sentences: c.sentences,
+      startIndex: from,
+      lang: book.lang,
+      onIndex: scrollIntoViewIfNeeded,
+      onEnd: () => {
+        // Конец главы — продолжаем со следующей.
+        if (chapterIdx < book.chapters.length - 1) { continueAudiobook.current = true; goChapter(1); }
+      },
+    });
+  };
+  const toggleAudiobook = () => {
+    if (!ab.active) startBook(topSentence.current || 0);
+    else if (ab.playing) pauseAudiobook();
+    else resumeAudiobook();
+  };
   const onRetry = useCallback((s) => api.post(`/api/sentences/${s.id}/retry`).then(() => loadChapter(s ? chapterRef.current.idx : 0)), [loadChapter]);
   const getSentence = useCallback((idx) => chapterRef.current?.sentences?.[idx] || null, []);
 
@@ -300,6 +347,19 @@ export default function Reader({ param }) {
           <button className="small" onClick={() => goChapter(-1)} disabled={!chapterIdx} title="Предыдущая глава (Alt+←)">‹</button>
           <button className="small" onClick={() => goChapter(1)} disabled={chapterIdx >= book.chapters.length - 1} title="Следующая глава (Alt+→)">›</button>
           <button className="small" onClick={addBookmark} title="Закладка на текущем предложении">🔖</button>
+          <span className={`audiobook${ab.active ? ' on' : ''}`}>
+            <button className={`small${ab.playing ? ' active' : ''}`} onClick={toggleAudiobook} title="Аудиокнига: читать главу вслух (клавиша A)">
+              {ab.playing ? '⏸' : '🎧'}{ab.active ? '' : ' Аудиокнига'}
+            </button>
+            {ab.active && (
+              <>
+                <button className="small" onClick={() => seekAudiobook(-1)} title="Предыдущее предложение (Shift+↑)">⏮</button>
+                <button className="small" onClick={() => seekAudiobook(1)} title="Следующее предложение (Shift+↓)">⏭</button>
+                <button className="small" onClick={stopAudiobook} title="Остановить аудиокнигу">⏹</button>
+                <span className="muted small">№{ab.index + 1}</span>
+              </>
+            )}
+          </span>
           <button className="small hint-toggle" onClick={cycleHintMode} title="Режим подсказок над словами (клавиша H)">{HINT_MODE_LABELS[hintMode]}</button>
           <select className="small ru-select" value={ruMode} onChange={(e) => setRuMode(e.target.value)} title="Колонка перевода (клавиша T — показать/скрыть)">
             {RU_MODES.map((m) => <option key={m} value={m}>{RU_MODE_LABELS[m]}</option>)}

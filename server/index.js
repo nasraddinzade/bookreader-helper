@@ -16,6 +16,7 @@ import { pump, pauseAll, resumeAll, queueStatus, retrySentence, retryBookErrors,
 import { killAllClaude } from './providers/claude-code.js';
 import { saveItem, findItem, keyFor, listItems, deleteItem, deleteExample, savedKeys, answer, exportJson, getItem } from './vocab.js';
 import { translateSelection, storeSelection } from './selection.js';
+import { sentenceAudio, textAudio, ttsStatus, kickTts, resetAudio, stopTts, synth } from './tts/index.js';
 
 const app = Fastify({ logger: { level: 'warn' }, bodyLimit: 10 * 1024 * 1024 });
 await app.register(multipart, { limits: { fileSize: 300 * 1024 * 1024, files: 1 } });
@@ -166,6 +167,43 @@ app.post('/api/selection', async (req, reply) => {
 });
 app.post('/api/selection/cache', async (req) => { storeSelection(req.body || {}); return { ok: true }; });
 
+// ---- Озвучка ----------------------------------------------------------------
+
+const sendAudio = (reply, file) => {
+  reply.header('Cache-Control', 'no-cache');
+  return reply.type(file.endsWith('.ogg') ? 'audio/ogg' : 'audio/mpeg').send(fs.createReadStream(file));
+};
+
+app.get('/api/audio/:sid', async (req, reply) => {
+  try {
+    const file = await sentenceAudio(num(req.params.sid));
+    return file ? sendAudio(reply, file) : notFound(reply);
+  } catch (e) {
+    return reply.code(503).send({ error: 'Озвучка недоступна: ' + e.message });
+  }
+});
+app.get('/api/tts', async (req, reply) => {
+  const text = String(req.query.text || '').slice(0, 600).trim();
+  if (!text) return reply.code(400).send({ error: 'Пустой текст' });
+  try {
+    return sendAudio(reply, await textAudio(text));
+  } catch (e) {
+    return reply.code(503).send({ error: 'Озвучка недоступна: ' + e.message });
+  }
+});
+app.get('/api/tts/status', async () => ttsStatus());
+app.post('/api/tts/sample', async (req, reply) => {
+  const { voice, speed, text } = req.body || {};
+  try {
+    const r = await synth(text || 'Alice was beginning to get very tired of sitting by her sister on the bank.', { voice, speed, urgent: true });
+    reply.header('Cache-Control', 'no-store');
+    return reply.type(r.ext === 'ogg' ? 'audio/ogg' : 'audio/mpeg').send(r.data);
+  } catch (e) {
+    return reply.code(503).send({ error: e.message });
+  }
+});
+app.post('/api/tts/reset', async (req) => { resetAudio(req.body?.bookId ? num(req.body.bookId) : null); return { ok: true }; });
+
 // ---- События (SSE) -----------------------------------------------------------
 
 app.get('/api/events', (req, reply) => {
@@ -188,7 +226,11 @@ if (fs.existsSync(DIST_DIR)) {
     root: DIST_DIR,
     prefix: '/',
     // index.html не кэшируем: после пересборки он ссылается на новые файлы с хэшами.
-    setHeaders: (res, file) => { if (file.endsWith('.html')) res.setHeader('Cache-Control', 'no-cache'); },
+    setHeaders: (res, file) => {
+      if (!file.endsWith('.html')) return;
+      if (typeof res.setHeader === 'function') res.setHeader('Cache-Control', 'no-cache');
+      else res.header?.('Cache-Control', 'no-cache');
+    },
   });
 } else {
   app.get('/', async () => 'Фронтенд не собран: выполните npm run build (или npm start).');
@@ -197,7 +239,10 @@ if (fs.existsSync(DIST_DIR)) {
 await app.listen({ host: HOST, port: PORT });
 console.log(`Book reader: http://${HOST}:${PORT}  (данные: ${DATA_DIR})`);
 
-const shutdown = async () => { killAllClaude(); await app.close().catch(() => {}); process.exit(0); };
+bus.on('event', (ev) => { if (ev.type === 'chapter-done' || ev.type === 'settings' || ev.type === 'position') kickTts(); });
+kickTts();
+
+const shutdown = async () => { killAllClaude(); stopTts(); await app.close().catch(() => {}); process.exit(0); };
 process.on('exit', killAllClaude);
 pump();
 process.on('SIGINT', shutdown);

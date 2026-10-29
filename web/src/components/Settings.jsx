@@ -1,10 +1,87 @@
+import { useEffect, useState } from 'react';
 import { useSettings, updateSettings, HINT_MODES, HINT_MODE_LABELS, RU_MODES, RU_MODE_LABELS } from '../lib/settings.js';
+import { api } from '../lib/api.js';
+import { playUrl, useSpeakingId } from '../lib/tts.js';
+import { useServerEvents } from '../lib/events.js';
 
 const PROVIDERS = [
   ['claude-code', 'Claude Code (подписка, claude -p)'],
   ['ollama', 'Ollama (локально)'],
   ['stub', 'Без перевода (проверка интерфейса)'],
 ];
+
+function TtsSection({ s, set }) {
+  const [st, setSt] = useState(null);
+  const [sample, setSample] = useState('');
+  const speakingId = useSpeakingId();
+  const load = () => api.get('/api/tts/status').then(setSt).catch(() => {});
+  useEffect(() => { load(); const t = setInterval(load, 5000); return () => clearInterval(t); }, []);
+  useServerEvents((ev) => { if (ev.type === 'tts') load(); });
+
+  const listen = async () => {
+    setSample('Генерирую пример…');
+    try {
+      const r = await fetch('/api/tts/sample', {
+        method: 'POST',
+        headers: { 'Content-Type': 'application/json' },
+        body: JSON.stringify({ voice: s.ttsVoice, speed: s.ttsSpeed }),
+      });
+      if (!r.ok) throw new Error((await r.json()).error);
+      const url = URL.createObjectURL(await r.blob());
+      setSample('');
+      await playUrl(url, 'sample');
+      URL.revokeObjectURL(url);
+    } catch (e) {
+      setSample(e.message);
+    }
+  };
+  const resetAll = async () => {
+    if (!window.confirm('Удалить всю готовую озвучку и сгенерировать её заново текущим голосом?')) return;
+    await api.post('/api/tts/reset', {});
+    load();
+  };
+
+  const voices = st?.voices?.length ? st.voices : [{ id: s.ttsVoice || 'af_heart', name: s.ttsVoice || 'af_heart', language: '', gender: '', overallGrade: '' }];
+  return (
+    <section>
+      <h2>Озвучка (Kokoro-82M, на этом компьютере)</h2>
+      <div className="form-grid3">
+        <label>Голос
+          <select value={s.ttsVoice || 'af_heart'} onChange={set('ttsVoice')}>
+            {voices.map((v) => (
+              <option key={v.id} value={v.id}>{v.name} — {v.language === 'en-gb' ? 'британский' : 'американский'}, {v.gender === 'Female' ? 'жен.' : 'муж.'}{v.overallGrade ? `, оценка ${v.overallGrade}` : ''}</option>
+            ))}
+          </select>
+        </label>
+        <label>Скорость: {Number(s.ttsSpeed || 1).toFixed(2)}×
+          <input type="range" min="0.6" max="1.4" step="0.05" value={s.ttsSpeed || 1} onChange={set('ttsSpeed')} />
+        </label>
+        <label>Потоков CPU для озвучки
+          <input type="number" min="1" max="8" value={s.ttsThreads ?? 4} onChange={set('ttsThreads')} />
+        </label>
+      </div>
+      <div className="form-row">
+        <button className={speakingId === 'sample' ? 'active' : ''} onClick={listen}>🔊 Прослушать пример</button>
+        {sample && <span className="muted">{sample}</span>}
+      </div>
+      <label className="check"><input type="checkbox" checked={!!s.ttsEnabled} onChange={set('ttsEnabled')} /> Озвучивать переведённые главы в фоне</label>
+      <label className="check"><input type="checkbox" checked={!!s.ttsPaused} onChange={set('ttsPaused')} /> Пауза фоновой озвучки</label>
+      {st && (
+        <p className="muted small">
+          Состояние: {st.status === 'ready' ? 'модель загружена' : st.status === 'loading' ? 'загружается модель…' : st.status === 'error' ? `ошибка: ${st.error}` : 'не запущена'}
+          {st.speedX ? ` · скорость ${st.speedX}× реального времени` : ''}
+          {' · '}формат {st.encoder}
+          {' · '}без озвучки {st.left} предл.{st.background ? ' · озвучиваю в фоне' : ''}
+        </p>
+      )}
+      <p className="muted small">
+        Голос и скорость применяются к новой озвучке. Готовые файлы остаются прежними —
+        <button className="link small" onClick={resetAll}>переозвучить всё заново</button>.
+        Пока идёт перевод через Ollama, фоновая озвучка ждёт, чтобы не занимать все ядра.
+      </p>
+    </section>
+  );
+}
 
 export default function Settings() {
   const s = useSettings();
@@ -54,6 +131,8 @@ export default function Settings() {
           очередь встанет на паузу и продолжит сама после сброса лимита.
         </p>
       </section>
+
+      <TtsSection s={s} set={set} />
 
       <section>
         <h2>Чтение</h2>

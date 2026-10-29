@@ -235,6 +235,11 @@ export function pump() {
   for (let i = 0; i < start; i++) worker();
 }
 
+/** Идёт ли сейчас перевод, который грузит процессор (Ollama). Тогда фоновая озвучка ждёт. */
+export function cpuHeavyTranslation() {
+  return getSettings().provider === 'ollama' && state.workers > 0;
+}
+
 // ---- Управление и состояние для интерфейса -------------------------------------
 
 export function pauseAll() {

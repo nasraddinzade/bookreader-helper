@@ -146,6 +146,8 @@ export const DEFAULT_SETTINGS = {
   ttsVoice: 'af_heart',
   ttsSpeed: 1,
   ttsThreads: 4,
+  ttsDtype: 'fp32', // fp32 на этом CPU быстрее q8
+  ttsPaused: false,
   hintMode: 'visible', // visible | hover | off
   ruColumn: 'show', // show | hide | click
 };
