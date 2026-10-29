@@ -308,3 +308,18 @@ textarea { resize: vertical; line-height: 1.4; }
 .reader-progress .queue-status { flex-wrap: nowrap; min-width: 0; }
 .reader-progress .qs-text { white-space: nowrap; overflow: hidden; text-overflow: ellipsis; min-width: 0; }
 @media (max-width: 720px) { .reader-bar .hint-toggle { min-width: 0; } .reader-bar .ru-select { min-width: 0; } }
+
+/* ---- Фаза 3: словарь и повторение ---- */
+a.btn { display: inline-block; text-decoration: none; color: var(--fg); background: var(--bg2); border: 1px solid var(--line); border-radius: var(--radius); padding: 0.3rem 0.7rem; font-size: 0.95rem; }
+a.btn:hover { border-color: var(--muted); }
+.vocab .filters { grid-template-columns: 2fr 1fr 1fr; }
+@media (max-width: 720px) { .vocab .filters { grid-template-columns: 1fr; } }
+.examples li { align-items: flex-start; margin-top: 0.3rem; }
+.ex-body { flex: 1; min-width: 0; }
+.ex-src { display: flex; gap: 0.8rem; flex-wrap: wrap; margin-top: 0.1rem; }
+.ex-src a { color: var(--accent); }
+mark { background: var(--saved-bg); color: inherit; border-radius: 2px; padding: 0 1px; }
+.tabs { display: flex; gap: 0.3rem; margin: 0.2rem 0 0.6rem; }
+.tabs a { text-decoration: none; color: var(--fg2); padding: 0.25rem 0.7rem; border-radius: var(--radius); border: 1px solid var(--line); }
+.tabs a.active { background: var(--accent-bg); color: var(--accent); border-color: var(--accent); }
+.fc-kind { text-transform: uppercase; letter-spacing: 0.05em; }

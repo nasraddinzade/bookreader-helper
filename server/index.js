@@ -184,7 +184,12 @@ app.get('/api/events', (req, reply) => {
 // ---- Фронтенд ----------------------------------------------------------------
 
 if (fs.existsSync(DIST_DIR)) {
-  await app.register(fastifyStatic, { root: DIST_DIR, prefix: '/' });
+  await app.register(fastifyStatic, {
+    root: DIST_DIR,
+    prefix: '/',
+    // index.html не кэшируем: после пересборки он ссылается на новые файлы с хэшами.
+    setHeaders: (res, file) => { if (file.endsWith('.html')) res.setHeader('Cache-Control', 'no-cache'); },
+  });
 } else {
   app.get('/', async () => 'Фронтенд не собран: выполните npm run build (или npm start).');
 }
