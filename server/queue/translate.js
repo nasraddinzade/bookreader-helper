@@ -9,6 +9,9 @@ import { createProvider } from '../providers/index.js';
 import { matchResults, finalize, repairTokens } from '../gloss.js';
 
 const MAX_ATTEMPTS = 3;
+// Пачка ограничена и числом слов: глоссы — это ~30 выходных токенов на слово, и пачка
+// из 12 длинных предложений генерировалась бы дольше 10 минут. 250 слов ≈ 8 тыс. токенов ≈ 1,5 мин.
+const WORDS_PER_BATCH = 250;
 const AUTH_RECHECK_MS = 2 * 60 * 1000;
 const RATE_WINDOW_MS = 20 * 60 * 1000;
 
@@ -93,7 +96,14 @@ function pickJob() {
       .filter((r) => !state.inflight.has(r.id));
     if (!rows.length) continue;
     const chapter = rows[0].chapter;
-    const items = rows.filter((r) => r.chapter === chapter).slice(0, batchSize);
+    const items = [];
+    let words = 0;
+    for (const r of rows.filter((x) => x.chapter === chapter).slice(0, batchSize)) {
+      const w = r.text.split(/\s+/).length;
+      if (items.length && words + w > WORDS_PER_BATCH) break;
+      items.push(r);
+      words += w;
+    }
     return { book, chapter, items };
   }
   return null;

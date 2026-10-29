@@ -18,7 +18,8 @@ npm start
 окне и открывает читалку в браузере; если сервер уже запущен — просто открывает читалку. Закрытие окна сервера его останавливает.
 
 - Данные (книги, база, аудио, модели) — в `D:\bookreader-data` (другая папка — переменная `BOOKREADER_DATA`).
-- Перевод через Claude Code требует входа CLI по подписке: `claude auth login` (один раз, в обычном терминале).
+- Перевод через Claude Code требует входа CLI по подписке (один раз): `powershell -ExecutionPolicy Bypass -File scriptsclaude-login.ps1`
+  — это `claude auth login` с очищенным окружением (без переменных Claude Desktop и ANTHROPIC_*).
 - Для разработки: `npm run dev` (Vite на 5173 с прокси к серверу на 5180). Тесты: `npm test`.
 
 ## Как пользоваться
@@ -43,6 +44,8 @@ npm start
 - **claude-code** (по умолчанию): `claude -p --model sonnet --output-format json --no-session-persistence
   --system-prompt-file … --tools "" --strict-mcp-config …`. Без `--bare` (он отключает вход по подписке);
   из окружения дочернего процесса удаляются `ANTHROPIC_*` и переменные чужого сеанса Claude Code.
+  Thinking выключен (`MAX_THINKING_TOKENS=0`): с ним та же пачка шла в 3,5 раза дольше и тратила в 4 раза больше токенов.
+  Пачка ограничена 12 предложениями и 250 словами; ответ читается потоком, процесс снимается только после 3 минут тишины.
   При лимите подписки очередь встаёт на паузу и продолжает сама после сброса.
 - **ollama**: локальная модель (по умолчанию `qwen3:8b`, быстрее — `gemma3:4b`), structured output по JSON-схеме,
   thinking выключен, число потоков ограничено. Ollama лежит в `D:\bookreader-data\ollama`, модели —

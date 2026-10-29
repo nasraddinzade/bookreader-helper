@@ -3,7 +3,7 @@ import { api } from '../lib/api.js';
 import { navigate } from '../lib/route.js';
 import { useServerEvents } from '../lib/events.js';
 import { useSettings, updateSettings, getSettings, HINT_MODES, HINT_MODE_LABELS, RU_MODES, RU_MODE_LABELS } from '../lib/settings.js';
-import { useSavedKeys, isTokenSaved, phraseTokenSet } from '../lib/vocab.js';
+import { useSavedKeys, isTokenSaved, phraseTokenSet, cleanCtx } from '../lib/vocab.js';
 import {
   speakSentence, speakText, useSpeakingId, useAudiobook, startAudiobook, pauseAudiobook, resumeAudiobook,
   seekAudiobook, jumpAudiobook, stopAudiobook, updateAudiobookSentences,
@@ -32,9 +32,9 @@ function Token({ t, id, hintMode, tapped, saved, inPhrase, onTap, onOpen }) {
         onOpen?.(e);
       }}
     >
-      <span className="g">{t.ctx || ' '}</span>
+      <span className="g">{cleanCtx(t.ctx) || ' '}</span>
       <span className="w">{t.en}</span>
-      {hintMode === 'hover' && t.ctx ? <span className="tip">{t.ctx}</span> : null}
+      {hintMode === 'hover' && t.ctx ? <span className="tip">{cleanCtx(t.ctx)}</span> : null}
     </span>
   );
 }

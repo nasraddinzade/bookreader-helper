@@ -11,7 +11,10 @@ import { systemPromptFor, buildUserMessage, parseJsonResponse, extractSentences 
 import { ProviderError, limitError, authError, unavailableError } from './errors.js';
 
 const WORK_DIR = path.join(DATA_DIR, 'claude-work');
-const CALL_TIMEOUT_MS = 6 * 60 * 1000;
+// Ответ читается потоком (stream-json): процесс убивается, только если он долго молчит,
+// а не по общему времени — большая пачка честно генерируется несколько минут.
+const IDLE_TIMEOUT_MS = 3 * 60 * 1000;
+const HARD_TIMEOUT_MS = 20 * 60 * 1000;
 fs.mkdirSync(WORK_DIR, { recursive: true });
 
 const active = new Set();
@@ -25,6 +28,9 @@ export function cleanEnv() {
     if (/^ANTHROPIC_/i.test(k)) delete env[k];
     else if (/^(CLAUDECODE|CLAUDE_CODE_.*|CLAUDE_AGENT_SDK_.*|CLAUDE_PID|CLAUDE_EFFORT|USE_LOCAL_OAUTH|USE_STAGING_OAUTH)$/i.test(k)) delete env[k];
   }
+  // Без размышлений: глоссированию они не нужны, а съедают ~3/4 выходных токенов и времени
+  // (замер: 2 длинных предложения — 13 847 токенов и 127 с с thinking, 3 582 и 36 с без).
+  env.MAX_THINKING_TOKENS = '0';
   return env;
 }
 
@@ -66,34 +72,68 @@ function classify(message) {
   return new ProviderError('Ошибка Claude Code: ' + msg.slice(0, 300), { retryable: true });
 }
 
+/**
+ * Запускает claude -p с --output-format stream-json и возвращает итоговое событие result
+ * ({ is_error, subtype, result, usage }).
+ */
 function runClaude(args, input, signal) {
   return new Promise((resolve, reject) => {
     let child;
     try {
-      child = spawn('claude', args, { cwd: WORK_DIR, env: cleanEnv(), windowsHide: true, stdio: ['pipe', 'pipe', 'pipe'] });
+      child = spawn('claude', [...args, '--output-format', 'stream-json', '--verbose', '--include-partial-messages'],
+        { cwd: WORK_DIR, env: cleanEnv(), windowsHide: true, stdio: ['pipe', 'pipe', 'pipe'] });
     } catch (e) {
       reject(unavailableError('Не найден Claude Code CLI (claude): ' + e.message));
       return;
     }
     active.add(child);
-    let out = '';
+    let buf = '';
     let err = '';
-    const timer = setTimeout(() => child.kill(), CALL_TIMEOUT_MS);
+    let result = null;
+    let lastLine = '';
+    let killedFor = '';
+    let idle = null;
+    const kick = () => {
+      clearTimeout(idle);
+      idle = setTimeout(() => { killedFor = 'нет ответа 3 минуты'; child.kill(); }, IDLE_TIMEOUT_MS);
+    };
+    kick();
+    const hard = setTimeout(() => { killedFor = 'ответ дольше 20 минут'; child.kill(); }, HARD_TIMEOUT_MS);
     const onAbort = () => child.kill();
     signal?.addEventListener('abort', onAbort, { once: true });
-    child.stdout.on('data', (d) => { out += d; });
+    const takeLine = (line) => {
+      if (!line) return;
+      lastLine = line;
+      if (line.startsWith('{"type":"result"')) {
+        try { result = JSON.parse(line); } catch { /* битая строка */ }
+      }
+    };
+    child.stdout.on('data', (d) => {
+      kick();
+      buf += d;
+      let nl;
+      while ((nl = buf.indexOf('\n')) >= 0) {
+        takeLine(buf.slice(0, nl).trim());
+        buf = buf.slice(nl + 1);
+      }
+    });
     child.stderr.on('data', (d) => { err += d; });
+    const done = () => { clearTimeout(idle); clearTimeout(hard); active.delete(child); signal?.removeEventListener('abort', onAbort); };
     child.on('error', (e) => {
-      clearTimeout(timer);
-      active.delete(child);
+      done();
       reject(e.code === 'ENOENT' ? unavailableError('Не найден Claude Code CLI (claude) в PATH') : classify(e.message));
     });
     child.on('close', (code) => {
-      clearTimeout(timer);
-      active.delete(child);
-      signal?.removeEventListener('abort', onAbort);
+      done();
       if (signal?.aborted) { reject(Object.assign(new Error('aborted'), { name: 'AbortError' })); return; }
-      resolve({ code, out, err });
+      takeLine(buf.trim());
+      if (!result) {
+        reject(killedFor
+          ? new ProviderError('Claude Code остановлен: ' + killedFor, { retryable: true, reduceBatch: true })
+          : classify(err || lastLine || `claude завершился с кодом ${code}`));
+        return;
+      }
+      resolve(result);
     });
     child.stdin.on('error', () => {});
     child.stdin.end(input);
@@ -105,7 +145,6 @@ export function claudeCodeProvider({ model = 'sonnet', effort = 'low', src = 'en
   const args = [
     '-p',
     '--model', model,
-    '--output-format', 'json',
     '--no-session-persistence',
     '--system-prompt-file', file,
     '--tools', '',
@@ -116,11 +155,8 @@ export function claudeCodeProvider({ model = 'sonnet', effort = 'low', src = 'en
   if (effort) args.push('--effort', effort);
 
   async function call(userMessage, signal) {
-    const { code, out, err } = await runClaude(args, userMessage, signal);
-    let j = null;
-    try { j = JSON.parse(out.trim().split('\n').filter(Boolean).pop() || ''); } catch { /* не JSON */ }
-    if (!j) throw classify(err || out || `claude завершился с кодом ${code}`);
-    if (j.is_error || j.subtype !== 'success') throw classify(j.result || j.error || j.subtype || err);
+    const j = await runClaude(args, userMessage, signal);
+    if (j.is_error || j.subtype !== 'success') throw classify(j.result || j.error || j.subtype);
     if (typeof j.result !== 'string' || !j.result.trim()) throw new ProviderError('Пустой ответ Claude', { retryable: true });
     return j;
   }
@@ -146,12 +182,9 @@ export function claudeCodeProvider({ model = 'sonnet', effort = 'low', src = 'en
 
 /** Короткий текстовый запрос (перевод выделения, если нет Ollama и встроенного переводчика браузера). */
 export async function claudeText(prompt, { model = 'haiku', system = 'You are a precise English→Russian translator. Reply with the translation only.' } = {}) {
-  const args = ['-p', '--model', model, '--output-format', 'json', '--no-session-persistence', '--system-prompt', system,
+  const args = ['-p', '--model', model, '--no-session-persistence', '--system-prompt', system,
     '--tools', '', '--strict-mcp-config', '--mcp-config', '{"mcpServers":{}}', '--disable-slash-commands', '--setting-sources', '', '--effort', 'low'];
-  const { out, err, code } = await runClaude(args, prompt);
-  let j = null;
-  try { j = JSON.parse(out.trim().split('\n').filter(Boolean).pop() || ''); } catch { /* не JSON */ }
-  if (!j) throw classify(err || out || `claude завершился с кодом ${code}`);
+  const j = await runClaude(args, prompt);
   if (j.is_error) throw classify(j.result);
   return String(j.result || '').trim();
 }

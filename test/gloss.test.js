@@ -30,3 +30,11 @@ test('segment: Mr., e.g. и —Mr. не режут предложение', () =
   const { sentences } = splitIntoSentences('He met Mr. Smith, e.g. on Monday. It was Hosmer—Mr. Angel. Then he left.');
   assert.deepEqual(sentences, ['He met Mr. Smith, e.g. on Monday.', 'It was Hosmer—Mr. Angel.', 'Then he left.']);
 });
+
+test('parseJsonResponse: неэкранированные кавычки в переводе чинятся', async () => {
+  const { parseJsonResponse } = await import('../server/providers/prompt.js');
+  const raw = '{"sentences":[{"full":"Она сказала: "Ой!" и убежала.","tokens":[{"en":"“Oh!”","ctx":"ой","lemma":"oh","base":"ой","pos":"interj"}]}]}';
+  const j = parseJsonResponse(raw);
+  assert.equal(j.sentences[0].tokens[0].en, '“Oh!”');
+  assert.match(j.sentences[0].full, /Ой!/);
+});

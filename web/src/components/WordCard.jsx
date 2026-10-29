@@ -1,6 +1,6 @@
 import { useEffect, useState } from 'react';
 import { speakText, speakSentence, useSpeakingId } from '../lib/tts.js';
-import { vocabApi } from '../lib/vocab.js';
+import { vocabApi, cleanCtx } from '../lib/vocab.js';
 
 const clean = (s) => String(s || '').replace(/^[^\p{L}\p{N}]+|[^\p{L}\p{N}]+$/gu, '');
 
@@ -60,7 +60,7 @@ export default function WordCard({ token, sentence, book, chapter, onClose }) {
           {token.pos && <span className="chip">{token.pos}</span>}
         </div>
         <dl className="card-grid">
-          <dt>В контексте</dt><dd>{token.ctx || <span className="muted">—</span>}</dd>
+          <dt>В контексте</dt><dd>{cleanCtx(token.ctx) || <span className="muted">—</span>}</dd>
           <dt>Начальная форма</dt><dd>{showLemma ? token.lemma : <span className="muted">{token.lemma || '—'}</span>}</dd>
           <dt>Словарь</dt><dd>{token.base || <span className="muted">—</span>}</dd>
         </dl>

@@ -39,6 +39,13 @@ export function useSavedKeys(lang = 'en') {
   return keyCache.get(lang) || null;
 }
 
+/** Перевод слова без пунктуации, которую модель иногда переносит из предложения («поздно!»» → «поздно»). */
+export function cleanCtx(ctx) {
+  const s = String(ctx || '').trim();
+  if (s === '–' || s === '—') return s;
+  return s.replace(/^[«»"“”„‘’'.,;:!?…()\s]+|[«»"“”„‘’'.,;:!?…()\s]+$/g, '') || s;
+}
+
 export function isTokenSaved(t, keys) {
   if (!keys) return false;
   const l = wordKey(t.lemma);

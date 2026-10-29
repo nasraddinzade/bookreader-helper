@@ -1,6 +1,8 @@
 // Системный промт для глоссирования. Формат ответа — строго JSON { full, tokens: [{ en, ctx, lemma, base, pos }] }.
 // Промт подобран под пару английский → русский; пары языков хранятся у книги, а не зашиты в код.
 
+import { jsonrepair } from 'jsonrepair';
+
 const EN_RU = `You are an interlinear glossing engine for Russian speakers who are learning English.
 You receive English sentences and return STRICT JSON. No prose, no markdown fences, no comments.
 
@@ -29,6 +31,7 @@ RULES (strict):
 10. "full" must be a natural, accurate, complete Russian translation of the sentence, consistent with the ctx glosses.
 11. Translate every sentence, including headings, fragments, and sentences that are already partially non-English. Never leave an item out.
 12. Copy characters exactly as given: keep curly quotes (“ ” ‘ ’), apostrophes, dashes (— –), ellipses and brackets as they are in the input; do not normalize or remove them.
+13. The output must be valid JSON. In Russian text ("full", "ctx", "base") use «guillemets» for quotation marks, never the straight double quote ". If an "en" value contains a straight double quote, escape it as \\".
 
 EXAMPLE
 Input: ["I'll get back to you on that."]
@@ -54,7 +57,11 @@ export function buildUserMessage(sentences) {
   );
 }
 
-/** Вытаскивает JSON из ответа модели, терпимо к ```json``` и тексту вокруг. */
+/**
+ * Вытаскивает JSON из ответа модели, терпимо к ```json``` и тексту вокруг.
+ * Битый JSON (чаще всего неэкранированные кавычки в русском переводе диалога) чинится jsonrepair;
+ * токены после починки всё равно проходят проверку выравнивания.
+ */
 export function parseJsonResponse(text) {
   let s = String(text ?? '').replace(/<think>[\s\S]*?<\/think>/gi, '').trim();
   const fence = s.match(/```(?:json)?\s*([\s\S]*?)```/i);
@@ -62,7 +69,40 @@ export function parseJsonResponse(text) {
   const first = s.indexOf('{');
   const last = s.lastIndexOf('}');
   if (first === -1 || last === -1 || last < first) throw new Error('В ответе модели нет JSON');
-  return JSON.parse(s.slice(first, last + 1));
+  const body = s.slice(first, last + 1);
+  try {
+    return JSON.parse(body);
+  } catch (e) {
+    const fixed = escapeStrayQuotes(body);
+    try { return JSON.parse(fixed); } catch { /* дальше jsonrepair */ }
+    try { return JSON.parse(jsonrepair(fixed)); } catch { throw e; }
+  }
+}
+
+/**
+ * Экранирует кавычки внутри строк: кавычка закрывает строку, только если за ней
+ * (после пробелов) идёт , } ] или :. Ловит «"full":"Она сказала: "Ой!" и ушла."».
+ */
+export function escapeStrayQuotes(s) {
+  let out = '';
+  let inStr = false;
+  for (let i = 0; i < s.length; i++) {
+    const ch = s[i];
+    if (!inStr) {
+      out += ch;
+      if (ch === '"') inStr = true;
+      continue;
+    }
+    if (ch === '\\') { out += ch + (s[i + 1] ?? ''); i++; continue; }
+    if (ch === '"') {
+      let j = i + 1;
+      while (j < s.length && /\s/.test(s[j])) j++;
+      if (j >= s.length || ',}]:'.includes(s[j])) { out += ch; inStr = false; } else out += '\\"';
+      continue;
+    }
+    out += ch;
+  }
+  return out;
 }
 
 function normalizeGloss(g) {
