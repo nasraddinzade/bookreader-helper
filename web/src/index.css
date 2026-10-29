@@ -287,3 +287,24 @@ textarea { resize: vertical; line-height: 1.4; }
 .bm-list { list-style: none; margin: 0; padding: 0; }
 .bm-list li { display: flex; gap: 0.3rem; align-items: flex-start; padding: 0.25rem 0; border-bottom: 1px solid var(--line); }
 .bm-list button.link { flex: 1; text-align: left; color: var(--fg); font-size: 0.9rem; }
+
+/* ---- Фаза 2: подсветка, очередь, выделение ---- */
+:root { --phrase-bg: #dff1ff; }
+@media (prefers-color-scheme: dark) { :root { --phrase-bg: #173a52; } }
+.tok.saved-phrase { background: var(--phrase-bg); border-radius: 0; }
+.tok.saved.saved-phrase { background: linear-gradient(var(--saved-bg), var(--phrase-bg)); }
+.row.speaking .en { background: var(--speak-bg); border-radius: 4px; }
+.row .play { align-self: start; }
+.queue-status { display: inline-flex; align-items: center; gap: 0.4rem; flex-wrap: wrap; font-size: 0.8rem; color: var(--muted); }
+.queue-status.warn .qs-text { color: #b7760a; }
+.lib-queue { margin: 0.3rem 0 0; }
+.sel-actions .active { background: var(--speak-bg); }
+.err button.small { margin-left: 0.3rem; }
+/* Панель читалки не должна менять высоту при переключении режимов — иначе текст прыгает. */
+.reader-bar .hint-toggle { min-width: 12.2rem; text-align: center; }
+.reader-bar .ru-select { min-width: 10.5rem; }
+.reader-progress { flex-wrap: nowrap; min-width: 0; overflow: hidden; }
+.reader-progress > span { white-space: nowrap; }
+.reader-progress .queue-status { flex-wrap: nowrap; min-width: 0; }
+.reader-progress .qs-text { white-space: nowrap; overflow: hidden; text-overflow: ellipsis; min-width: 0; }
+@media (max-width: 720px) { .reader-bar .hint-toggle { min-width: 0; } .reader-bar .ru-select { min-width: 0; } }

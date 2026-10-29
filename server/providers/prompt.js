@@ -1,6 +1,7 @@
-// Системный промт для модели. Формат ответа — строго JSON.
+// Системный промт для глоссирования. Формат ответа — строго JSON { full, tokens: [{ en, ctx, lemma, base, pos }] }.
+// Промт подобран под пару английский → русский; пары языков хранятся у книги, а не зашиты в код.
 
-export const SYSTEM_PROMPT = `You are an interlinear glossing engine for Russian speakers who are learning English.
+const EN_RU = `You are an interlinear glossing engine for Russian speakers who are learning English.
 You receive English sentences and return STRICT JSON. No prose, no markdown fences, no comments.
 
 INPUT: a JSON array of sentences.
@@ -27,6 +28,7 @@ RULES (strict):
 9. Function words with no Russian equivalent (auxiliary "do" in questions and negations, "to" before an infinitive, expletive "it" in "it rains") get ctx "–" and an explanation in base.
 10. "full" must be a natural, accurate, complete Russian translation of the sentence, consistent with the ctx glosses.
 11. Translate every sentence, including headings, fragments, and sentences that are already partially non-English. Never leave an item out.
+12. Copy characters exactly as given: keep curly quotes (“ ” ‘ ’), apostrophes, dashes (— –), ellipses and brackets as they are in the input; do not normalize or remove them.
 
 EXAMPLE
 Input: ["I'll get back to you on that."]
@@ -34,6 +36,15 @@ Output:
 {"sentences":[{"full":"Я вернусь к тебе по этому вопросу.","tokens":[{"en":"I'll","ctx":"я","lemma":"I will","base":"я буду","pos":"pron+aux"},{"en":"get back to you","ctx":"вернусь к тебе","lemma":"get back to","base":"вернуться к, связаться с","pos":"phrasal verb"},{"en":"on","ctx":"по","lemma":"on","base":"на, по, о","pos":"prep"},{"en":"that.","ctx":"этому","lemma":"that","base":"тот, это, который","pos":"pron"}]}]}
 
 Output JSON only.`;
+
+const PROMPTS = { 'en>ru': EN_RU };
+
+/** Системный промт для пары языков книги. */
+export function systemPromptFor(src = 'en', tgt = 'ru') {
+  const p = PROMPTS[`${src}>${tgt}`];
+  if (!p) throw new Error(`Перевод ${src} → ${tgt} пока не поддерживается (есть только en → ru)`);
+  return p;
+}
 
 export function buildUserMessage(sentences) {
   return (

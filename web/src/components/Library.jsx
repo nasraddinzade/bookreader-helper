@@ -1,6 +1,7 @@
 import { useEffect, useRef, useState } from 'react';
 import { api, uploadFile } from '../lib/api.js';
 import { useServerEvents } from '../lib/events.js';
+import QueueStatus from './QueueStatus.jsx';
 
 function Bar({ value, max, label, cls = '' }) {
   const pct = max ? Math.round((value / max) * 100) : 0;
@@ -65,6 +66,7 @@ export default function Library() {
         <input ref={fileRef} type="file" accept=".epub,.fb2,.zip,.txt" hidden onChange={onFile} />
       </div>
       <p className="muted small">EPUB, FB2 или TXT. Книга переводится в фоне, читать можно с первых переведённых глав.</p>
+      <p className="lib-queue"><QueueStatus /></p>
       {upload && (
         <p className="notice">{upload.phase}: {upload.name} {upload.phase === 'Загрузка' ? `${Math.round(upload.progress * 100)}%` : '…'}</p>
       )}

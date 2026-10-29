@@ -3,10 +3,15 @@ import { api } from '../lib/api.js';
 import { navigate } from '../lib/route.js';
 import { useServerEvents } from '../lib/events.js';
 import { useSettings, updateSettings, getSettings, HINT_MODES, HINT_MODE_LABELS, RU_MODES, RU_MODE_LABELS } from '../lib/settings.js';
+import { useSavedKeys, isTokenSaved, phraseTokenSet } from '../lib/vocab.js';
+import { speakSentence, speakText, useSpeakingId } from '../lib/tts.js';
+import WordCard from './WordCard.jsx';
+import SelectionPopover from './SelectionPopover.jsx';
+import QueueStatus from './QueueStatus.jsx';
 
-function Token({ t, id, hintMode, tapped, onTap, onOpen }) {
+function Token({ t, id, hintMode, tapped, saved, inPhrase, onTap, onOpen }) {
   const ptype = useRef('mouse');
-  const cls = ['tok', tapped && 'tapped'].filter(Boolean).join(' ');
+  const cls = ['tok', tapped && 'tapped', saved && 'saved', inPhrase && 'saved-phrase'].filter(Boolean).join(' ');
   return (
     <span
       className={cls}
@@ -31,14 +36,15 @@ function Token({ t, id, hintMode, tapped, onTap, onOpen }) {
   );
 }
 
-const Row = memo(function Row({ s, isNewPara, hintMode, ruMode, ruOpen, tappedTok, onTap, onToggleRu, onOpenToken }) {
+const Row = memo(function Row({ s, isNewPara, hintMode, ruMode, ruOpen, tappedTok, keys, speaking, onTap, onToggleRu, onOpenToken, onPlay, onRetry }) {
   const sid = `s${s.idx}`;
   const done = s.status === 'done' && s.gloss;
   const showRuInline = ruMode === 'click' && ruOpen;
+  const phraseToks = useMemo(() => (done ? phraseTokenSet(s.gloss.tokens, keys) : null), [done, s.gloss, keys]);
   return (
     <div
       data-index={s.idx}
-      className={['row', isNewPara && 'para', s.kind === 'h' && 'heading', s.status].filter(Boolean).join(' ')}
+      className={['row', isNewPara && 'para', s.kind === 'h' && 'heading', s.status, speaking && 'speaking'].filter(Boolean).join(' ')}
     >
       <button
         className={`num${ruMode === 'click' ? ' clickable' : ''}${ruOpen ? ' open' : ''}`}
@@ -48,7 +54,7 @@ const Row = memo(function Row({ s, isNewPara, hintMode, ruMode, ruOpen, tappedTo
       >
         {s.idx + 1}
       </button>
-      <span className="play-slot" />
+      <button className={`play${speaking ? ' active' : ''}`} title="Прослушать предложение" onClick={() => onPlay(s)}>▶</button>
       <div className="en">
         {done ? (
           s.gloss.tokens.map((t, k) => (
@@ -59,6 +65,8 @@ const Row = memo(function Row({ s, isNewPara, hintMode, ruMode, ruOpen, tappedTo
                 id={`${sid}t${k}`}
                 hintMode={hintMode}
                 tapped={tappedTok === `${sid}t${k}`}
+                saved={isTokenSaved(t, keys)}
+                inPhrase={phraseToks?.has(k)}
                 onTap={onTap}
                 onOpen={() => onOpenToken?.(s, t, k)}
               />
@@ -68,13 +76,13 @@ const Row = memo(function Row({ s, isNewPara, hintMode, ruMode, ruOpen, tappedTo
           <span className="plain">{s.text}</span>
         )}
         {showRuInline && (
-          <div className="ru-inline">{done ? s.gloss.full : <span className="muted">ещё не переведено</span>}</div>
+          <div className="ru-inline">{done ? (s.gloss.full || <span className="muted">—</span>) : <span className="muted">ещё не переведено</span>}</div>
         )}
       </div>
       {ruMode === 'show' && (
         <div className="ru">
           {done ? (s.gloss.full || <span className="muted">—</span>)
-            : s.status === 'error' ? <span className="err" title={s.error || ''}>ошибка перевода</span>
+            : s.status === 'error' ? <span className="err" title={s.error || ''}>ошибка перевода <button className="small" onClick={() => onRetry(s)}>Повторить</button></span>
             : <span className="muted">{s.status === 'pending' ? 'ждёт перевода…' : ''}</span>}
         </div>
       )}
@@ -96,6 +104,11 @@ export default function Reader({ param }) {
   const [ruOpen, setRuOpen] = useState(() => new Set());
   const [tocOpen, setTocOpen] = useState(false);
   const [bookmarks, setBookmarks] = useState([]);
+  const [card, setCard] = useState(null); // { sentence, token }
+  const keys = useSavedKeys(book?.lang || 'en');
+  const speakingId = useSpeakingId();
+  const chapterRef = useRef(null);
+  chapterRef.current = chapter;
   const scrollTarget = useRef(null); // номер предложения, к которому прокрутить после загрузки главы
   const topSentence = useRef(0);
   const refetchTimer = useRef(null);
@@ -199,7 +212,7 @@ export default function Reader({ param }) {
       const k = e.key.toLowerCase();
       if (k === 'h' || k === 'р') { e.preventDefault(); cycleHintMode(); }
       else if (k === 't' || k === 'е') { e.preventDefault(); toggleRuColumn(); }
-      else if (e.key === 'Escape') { setTapped(null); setTocOpen(false); }
+      else if (e.key === 'Escape') { setTapped(null); setTocOpen(false); setCard(null); }
       else if (e.altKey && e.key === 'ArrowRight') goChapter(1);
       else if (e.altKey && e.key === 'ArrowLeft') goChapter(-1);
     };
@@ -237,6 +250,15 @@ export default function Reader({ param }) {
     navigate(`read/${bookId}/${idx}/${sentence}`);
   };
 
+  const onOpenToken = useCallback((s, t) => {
+    setTapped(null);
+    speakText(t.en, { id: `tok-${s.id}`, lang: book?.lang || 'en' });
+    setCard({ sentence: s, token: t });
+  }, [book?.lang]);
+  const onPlay = useCallback((s) => speakSentence(s, { id: `sent-${s.id}`, lang: book?.lang || 'en' }), [book?.lang]);
+  const onRetry = useCallback((s) => api.post(`/api/sentences/${s.id}/retry`).then(() => loadChapter(s ? chapterRef.current.idx : 0)), [loadChapter]);
+  const getSentence = useCallback((idx) => chapterRef.current?.sentences?.[idx] || null, []);
+
   const toggleRu = useCallback((idx) => {
     setRuOpen((prev) => { const n = new Set(prev); if (n.has(idx)) n.delete(idx); else n.add(idx); return n; });
   }, []);
@@ -272,6 +294,7 @@ export default function Reader({ param }) {
               <progress value={chInfo.translated} max={chInfo.total || 1} />
             </span>
           )}
+          <QueueStatus bookId={bookId} compact />
         </div>
         <div className="reader-tools">
           <button className="small" onClick={() => goChapter(-1)} disabled={!chapterIdx} title="Предыдущая глава (Alt+←)">‹</button>
@@ -324,10 +347,19 @@ export default function Reader({ param }) {
               ruMode={ruMode}
               ruOpen={ruOpen.has(s.idx)}
               tappedTok={tapped && tapped.startsWith(`s${s.idx}t`) ? tapped : null}
+              keys={keys}
+              speaking={speakingId === `sent-${s.id}`}
               onTap={setTapped}
               onToggleRu={toggleRu}
+              onOpenToken={onOpenToken}
+              onPlay={onPlay}
+              onRetry={onRetry}
             />
           ))}
+          {card && (
+            <WordCard token={card.token} sentence={card.sentence} book={book} chapter={chapter} onClose={() => setCard(null)} />
+          )}
+          <SelectionPopover book={book} chapter={chapter} getSentence={getSentence} />
           <div className="chapter-end">
             {chapterIdx < book.chapters.length - 1 ? (
               <button className="primary" onClick={() => goChapter(1)}>Следующая глава: {book.chapters[chapterIdx + 1].title} ›</button>

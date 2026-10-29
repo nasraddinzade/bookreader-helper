@@ -135,6 +135,7 @@ const MIGRATIONS = [
 export const DEFAULT_SETTINGS = {
   targetLang: 'ru', // язык перевода для новых книг (хранится и у каждой книги)
   provider: 'claude-code', // claude-code | ollama | stub
+  translationPaused: false,
   claudeModel: 'sonnet', // sonnet | haiku | opus
   claudeEffort: 'low',
   batchSize: 12,
