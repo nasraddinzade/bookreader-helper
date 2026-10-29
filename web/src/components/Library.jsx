@@ -1,7 +1,7 @@
 import { useEffect, useRef, useState } from 'react';
 import { api, uploadFile } from '../lib/api.js';
 import { useServerEvents } from '../lib/events.js';
-import QueueStatus from './QueueStatus.jsx';
+import QueueStatus, { formatEta } from './QueueStatus.jsx';
 
 function Bar({ value, max, label, cls = '' }) {
   const pct = max ? Math.round((value / max) * 100) : 0;
@@ -21,7 +21,11 @@ export default function Library() {
   const fileRef = useRef(null);
   const reloadTimer = useRef(null);
 
-  const reload = () => api.get('/api/books').then(setBooks).catch((e) => setError(e.message));
+  const [queue, setQueue] = useState(null);
+  const reload = () => {
+    api.get('/api/queue').then(setQueue).catch(() => {});
+    return api.get('/api/books').then(setBooks).catch((e) => setError(e.message));
+  };
   useEffect(() => { reload(); }, []);
 
   // Прогресс перевода и озвучки приходит событиями; список перечитываем не чаще раза в 2 с.
@@ -89,7 +93,16 @@ export default function Library() {
                 <Bar label="Перевод" value={b.translated} max={b.total} />
                 <Bar label="Озвучка" value={b.voiced} max={b.total} cls="audio" />
                 <Bar label="Прочитано" value={b.readPercent} max={100} cls="read" />
-                {b.errors > 0 && <div className="error small">Ошибок перевода: {b.errors}</div>}
+                {b.errors > 0 && (
+                  <div className="error small">
+                    Ошибок перевода: {b.errors}{' '}
+                    <button className="link small" onClick={() => api.post(`/api/books/${b.id}/retry-errors`).then(reload)}>повторить</button>
+                  </div>
+                )}
+                {(() => {
+                  const q = queue?.books?.find((x) => x.id === b.id);
+                  return q?.etaMin != null && !b.paused ? <div className="muted small">До конца перевода: {formatEta(q.etaMin)}</div> : null;
+                })()}
                 <div className="book-actions">
                   <a href={`#/read/${b.id}`}>Читать</a>
                   {b.translated < b.total && (

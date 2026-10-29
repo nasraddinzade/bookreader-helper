@@ -114,6 +114,7 @@ export default function Reader({ param }) {
   chapterRef.current = chapter;
   const ab = useAudiobook();
   const continueAudiobook = useRef(false);
+  const audiobookChapter = useRef(null); // глава, которую сейчас читает аудиокнига
   const scrollTarget = useRef(null); // номер предложения, к которому прокрутить после загрузки главы
   const topSentence = useRef(0);
   const refetchTimer = useRef(null);
@@ -164,7 +165,8 @@ export default function Reader({ param }) {
   useEffect(() => {
     if (!chapter) return;
     if (continueAudiobook.current) { continueAudiobook.current = false; startBook(0); }
-    else updateAudiobookSentences(chapter.sentences);
+    else if (audiobookChapter.current === chapter.idx) updateAudiobookSentences(chapter.sentences);
+    else if (audiobookChapter.current !== null) { audiobookChapter.current = null; stopAudiobook(); } // ушли в другую главу
   }, [chapter]); // eslint-disable-line react-hooks/exhaustive-deps
 
   // Уход из читалки останавливает аудиокнигу.
@@ -287,6 +289,7 @@ export default function Reader({ param }) {
   const startBook = (from) => {
     const c = chapterRef.current;
     if (!c) return;
+    audiobookChapter.current = c.idx;
     startAudiobook({
       sentences: c.sentences,
       startIndex: from,

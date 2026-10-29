@@ -3,12 +3,82 @@ import { useSettings, updateSettings, HINT_MODES, HINT_MODE_LABELS, RU_MODES, RU
 import { api } from '../lib/api.js';
 import { playUrl, useSpeakingId } from '../lib/tts.js';
 import { useServerEvents } from '../lib/events.js';
+import { formatEta } from './QueueStatus.jsx';
 
 const PROVIDERS = [
   ['claude-code', 'Claude Code (подписка, claude -p)'],
   ['ollama', 'Ollama (локально)'],
   ['stub', 'Без перевода (проверка интерфейса)'],
 ];
+
+const OLLAMA_MODELS = [
+  ['qwen3:8b', 'qwen3:8b — качество лучше, ~5 ГБ RAM'],
+  ['gemma3:4b', 'gemma3:4b — быстрее, ~3 ГБ RAM'],
+];
+
+function OllamaSection({ s, set }) {
+  const [info, setInfo] = useState(null);
+  const [books, setBooks] = useState([]);
+  const [bookId, setBookId] = useState('');
+  const [bench, setBench] = useState(null);
+  const [busy, setBusy] = useState('');
+  const load = () => api.get('/api/ollama').then(setInfo).catch(() => {});
+  useEffect(() => { load(); api.get('/api/books').then(setBooks).catch(() => {}); }, []);
+  useServerEvents((ev) => { if (ev.type === 'ollama') { if (ev.pulling) setInfo((i) => i && { ...i, pulling: ev.pulling }); else load(); } });
+
+  const model = s.ollamaModel || 'qwen3:8b';
+  const has = info?.models?.some((m) => m === model || m === model + ':latest');
+  const run = async (what, fn) => {
+    setBusy(what);
+    try { await fn(); } catch (e) { setBench({ error: e.message }); } finally { setBusy(''); load(); }
+  };
+  const pull = () => run('pull', () => api.post('/api/ollama/pull', { model }));
+  const start = () => run('start', () => api.post('/api/ollama/start'));
+  const measure = () => run('bench', async () => setBench(await api.post('/api/ollama/benchmark', { model, bookId: bookId || undefined })));
+  const p = info?.pulling;
+  const options = [...new Set([...OLLAMA_MODELS.map((m) => m[0]), ...(info?.models || [])])];
+
+  return (
+    <div className="sub-section">
+      <p className="muted small">
+        {!info ? 'Проверяю Ollama…'
+          : !info.installed ? 'Ollama не найден (ожидается в D:\bookreader-data\ollama).'
+          : info.running ? `Ollama запущен${info.ownProcess ? ' приложением' : ''}. Модели: ${info.models.join(', ') || 'нет'}.`
+          : 'Ollama установлен, сервер запустится при первом переводе.'}
+        {info?.installed && !info.running && <button className="link small" onClick={start} disabled={!!busy}>запустить сейчас</button>}
+      </p>
+      <div className="form-grid3">
+        <label>Модель
+          <select value={model} onChange={set('ollamaModel')}>
+            {options.map((m) => <option key={m} value={m}>{OLLAMA_MODELS.find((x) => x[0] === m)?.[1] || m}</option>)}
+          </select>
+        </label>
+        <label>Потоков CPU
+          <input type="number" min="1" max="12" value={s.ollamaThreads ?? 6} onChange={set('ollamaThreads')} />
+        </label>
+        <label>Замер на книге
+          <select value={bookId} onChange={(e) => setBookId(e.target.value)}>
+            <option value="">примеры фраз</option>
+            {books.map((b) => <option key={b.id} value={b.id}>{b.title}</option>)}
+          </select>
+        </label>
+      </div>
+      <div className="form-row">
+        {info?.installed && !has && !p && <button onClick={pull} disabled={!!busy}>Скачать модель {model}</button>}
+        {p && <span>Скачивается {p.model}: {p.total ? Math.round((p.completed / p.total) * 100) + '%' : p.status}</span>}
+        {has && <button onClick={measure} disabled={!!busy}>{busy === 'bench' ? 'Замеряю…' : 'Замерить скорость (5 предложений)'}</button>}
+      </div>
+      {bench && (bench.error ? <p className="error small">{bench.error}</p> : (
+        <p className="small">
+          {bench.model}, {bench.threads} потоков: {bench.secPerSentence.toFixed(1)} с на предложение
+          ({bench.n} за {bench.seconds.toFixed(0)} с).
+          {bench.pending != null && <> Оценка на всю книгу ({bench.pending} предл.): <b>{formatEta(bench.etaMin)}</b>.</>}
+          {bench.cached ? ` Переводы замера сохранены (${bench.cached}).` : ''}
+        </p>
+      ))}
+    </div>
+  );
+}
 
 function TtsSection({ s, set }) {
   const [st, setSt] = useState(null);
@@ -123,6 +193,7 @@ export default function Settings() {
             </label>
           </div>
         )}
+        {s.provider === 'ollama' && <OllamaSection s={s} set={set} />}
         <label>Размер пачки (предложений за запрос)
           <input type="number" min="1" max="30" value={s.batchSize ?? 12} onChange={set('batchSize')} />
         </label>

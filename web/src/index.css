@@ -332,3 +332,4 @@ mark { background: var(--saved-bg); color: inherit; border-radius: 2px; padding:
 .settings label.check { display: flex; align-items: center; gap: 0.5rem; }
 .settings label.check input { width: auto; margin: 0; }
 button.active { background: var(--speak-bg); }
+.sub-section { border-left: 3px solid var(--line); padding-left: 0.8rem; margin: 0.5rem 0; }

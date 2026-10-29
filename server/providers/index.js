@@ -4,6 +4,7 @@
 
 import { claudeCodeProvider } from './claude-code.js';
 import { analyze } from '../../shared/gloss-local.js';
+import { ollamaProvider } from './ollama-gloss.js';
 
 export function stubProvider() {
   const gloss = (text) => ({
@@ -23,17 +24,13 @@ export function stubProvider() {
   };
 }
 
-let ollamaFactory = null;
-export function registerOllama(factory) { ollamaFactory = factory; }
-
 /** Провайдер по настройкам и паре языков книги. */
 export function createProvider(settings, src = 'en', tgt = 'ru') {
   switch (settings.provider) {
     case 'stub':
       return stubProvider();
     case 'ollama':
-      if (!ollamaFactory) throw new Error('Провайдер Ollama не подключён');
-      return { cacheable: true, ...ollamaFactory({ model: settings.ollamaModel, threads: settings.ollamaThreads, src, tgt }) };
+      return { cacheable: true, ...ollamaProvider({ model: settings.ollamaModel, threads: settings.ollamaThreads, src, tgt }) };
     case 'claude-code':
     default:
       return { cacheable: true, ...claudeCodeProvider({ model: settings.claudeModel, effort: settings.claudeEffort, src, tgt }) };

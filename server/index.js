@@ -12,7 +12,9 @@ import {
   listBookmarks, addBookmark, deleteBookmark,
 } from './books.js';
 import { bus, emit } from './events.js';
-import { pump, pauseAll, resumeAll, queueStatus, retrySentence, retryBookErrors, retranslateChapter } from './queue/translate.js';
+import { pump, pauseAll, resumeAll, queueStatus, retrySentence, retryBookErrors, retranslateChapter, cacheGlosses } from './queue/translate.js';
+import { ensureOllama, ollamaInfo, pullModel, benchmark, stopOllama } from './ollama-manager.js';
+import { ollamaProvider } from './providers/ollama-gloss.js';
 import { killAllClaude } from './providers/claude-code.js';
 import { saveItem, findItem, keyFor, listItems, deleteItem, deleteExample, savedKeys, answer, exportJson, getItem } from './vocab.js';
 import { translateSelection, storeSelection } from './selection.js';
@@ -204,6 +206,47 @@ app.post('/api/tts/sample', async (req, reply) => {
 });
 app.post('/api/tts/reset', async (req) => { resetAudio(req.body?.bookId ? num(req.body.bookId) : null); return { ok: true }; });
 
+// ---- Ollama -------------------------------------------------------------------
+
+app.get('/api/ollama', async () => ollamaInfo());
+app.post('/api/ollama/start', async (req, reply) => {
+  try { await ensureOllama(); return ollamaInfo(); } catch (e) { return reply.code(503).send({ error: e.message }); }
+});
+app.post('/api/ollama/pull', async (req, reply) => {
+  try { await pullModel(req.body?.model || getSettings().ollamaModel); return { ok: true }; } catch (e) { return reply.code(400).send({ error: e.message }); }
+});
+// Замер на 5 предложениях книги (или примерах) и оценка времени на всю книгу.
+// Переводы из замера попадают в кэш — очередь их не запрашивает повторно.
+app.post('/api/ollama/benchmark', async (req, reply) => {
+  const s = getSettings();
+  const model = req.body?.model || s.ollamaModel;
+  const bookId = req.body?.bookId ? num(req.body.bookId) : null;
+  const book = bookId ? getBookRow(bookId) : null;
+  const items = book
+    ? db.prepare(`SELECT s.id, s.text, s.hash FROM sentences s JOIN chapters c ON c.id = s.chapter_id
+        WHERE s.book_id = ? AND s.status = 'pending' AND length(s.text) > 40 ORDER BY (c.idx < ?), c.idx, s.idx LIMIT 5`).all(bookId, book.pos_chapter)
+    : [
+      'Alice was beginning to get very tired of sitting by her sister on the bank.',
+      'She found out that the rabbit had gone back to its hole.',
+      '“I shall be late!” said the Rabbit, and hurried off.',
+      'It was kind of strange, but she decided to get back to her reading.',
+      'There was nothing so very remarkable in that, and she went on.',
+    ].map((text, i) => ({ id: -i, text, hash: '' }));
+  if (!items.length) return reply.code(400).send({ error: 'В книге нет непереведённых предложений для замера' });
+  const provider = { cacheable: true, ...ollamaProvider({ model, threads: s.ollamaThreads, src: book?.lang || 'en', tgt: book?.target_lang || 'ru' }) };
+  try {
+    const t0 = Date.now();
+    const bench = await benchmark(provider, items.map((i) => i.text), Number(s.ollamaThreads) || 6);
+    let cached = 0;
+    if (book) cached = cacheGlosses(book, provider, items, bench.all);
+    const pending = book ? db.prepare("SELECT COUNT(*) AS n FROM sentences WHERE book_id = ? AND status = 'pending'").get(bookId).n : null;
+    const { all, ...rest } = bench;
+    return { ...rest, cached, pending, etaMin: pending ? Math.round((pending * bench.secPerSentence) / 60) : null, wallMs: Date.now() - t0 };
+  } catch (e) {
+    return reply.code(503).send({ error: e.message });
+  }
+});
+
 // ---- События (SSE) -----------------------------------------------------------
 
 app.get('/api/events', (req, reply) => {
@@ -242,8 +285,8 @@ console.log(`Book reader: http://${HOST}:${PORT}  (данные: ${DATA_DIR})`);
 bus.on('event', (ev) => { if (ev.type === 'chapter-done' || ev.type === 'settings' || ev.type === 'position') kickTts(); });
 kickTts();
 
-const shutdown = async () => { killAllClaude(); stopTts(); await app.close().catch(() => {}); process.exit(0); };
-process.on('exit', killAllClaude);
+const shutdown = async () => { killAllClaude(); stopTts(); stopOllama(); await app.close().catch(() => {}); process.exit(0); };
+process.on('exit', () => { killAllClaude(); stopOllama(); });
 pump();
 process.on('SIGINT', shutdown);
 process.on('SIGTERM', shutdown);

@@ -84,7 +84,10 @@ function wakeAt(ms) {
 // ---- Выбор работы -------------------------------------------------------------
 
 function pickJob() {
-  const batchSize = Math.max(1, Math.min(30, Number(getSettings().batchSize) || 12));
+  const s = getSettings();
+  // Локальной 8B-модели на CPU большие пачки не по силам: ответ обрезается и прогресс виден реже.
+  const cap = s.provider === 'ollama' ? 6 : 30;
+  const batchSize = Math.max(1, Math.min(cap, Number(s.batchSize) || 12));
   for (const book of booksToTranslate.all()) {
     const rows = pendingForBook.all(book.id, book.pos_chapter, batchSize + state.inflight.size + 1)
       .filter((r) => !state.inflight.has(r.id));
@@ -234,6 +237,19 @@ export function pump() {
   const start = want - state.workers;
   for (let i = 0; i < start; i++) worker();
 }
+
+/** Кладёт в кэш выровненные переводы (например, из замера скорости), чтобы очередь их не запрашивала. */
+export function cacheGlosses(book, provider, items, raw) {
+  const results = matchResults(items.map((i) => i.text), raw);
+  let n = 0;
+  items.forEach((item, k) => {
+    const r = results[k] ? finalize(item.text, results[k]) : null;
+    if (r?.aligned) { cachePut.run(cacheKey(provider, book.lang, book.target_lang, item.hash), JSON.stringify(r.gloss), Date.now()); n++; }
+  });
+  return n;
+}
+
+export { providerFor };
 
 /** Идёт ли сейчас перевод, который грузит процессор (Ollama). Тогда фоновая озвучка ждёт. */
 export function cpuHeavyTranslation() {

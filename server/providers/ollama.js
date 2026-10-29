@@ -16,14 +16,41 @@ export async function ollamaStatus({ fresh = false } = {}) {
   return upMemo;
 }
 
-export async function ollamaChat({ model, messages, format, options = {}, think = false, signal, timeoutMs = 10 * 60 * 1000 }) {
-  const body = { model, messages, stream: false, think, options, keep_alive: '10m' };
+/**
+ * Чат с моделью. Ответ читается потоком: на CPU генерация идёт минутами, а fetch в Node
+ * обрывает запрос, если заголовки ответа не пришли за 5 минут.
+ * Возвращает { message: { content }, done_reason, eval_count, eval_duration, total_duration }.
+ */
+export async function ollamaChat({ model, messages, format, options = {}, think = false, signal, timeoutMs = 30 * 60 * 1000 }) {
+  const body = { model, messages, stream: true, think, options, keep_alive: '10m' };
   if (format) body.format = format;
   const sig = signal ? AbortSignal.any([signal, AbortSignal.timeout(timeoutMs)]) : AbortSignal.timeout(timeoutMs);
   const r = await fetch(`${OLLAMA_URL}/api/chat`, { method: 'POST', headers: { 'Content-Type': 'application/json' }, body: JSON.stringify(body), signal: sig });
-  const text = await r.text();
-  let j;
-  try { j = JSON.parse(text); } catch { throw new Error(`Ollama: ${r.status} ${text.slice(0, 200)}`); }
-  if (!r.ok || j.error) throw new Error('Ollama: ' + (j.error || r.status));
-  return j; // { message: { content }, eval_count, eval_duration, total_duration, ... }
+  if (!r.ok) {
+    const text = await r.text();
+    let msg = text.slice(0, 200);
+    try { msg = JSON.parse(text).error || msg; } catch { /* не JSON */ }
+    throw new Error(`Ollama: ${msg}`);
+  }
+  const reader = r.body.getReader();
+  const dec = new TextDecoder();
+  let buf = '';
+  let content = '';
+  let last = {};
+  for (;;) {
+    const { done, value } = await reader.read();
+    if (done) break;
+    buf += dec.decode(value, { stream: true });
+    let nl;
+    while ((nl = buf.indexOf('\n')) >= 0) {
+      const line = buf.slice(0, nl).trim();
+      buf = buf.slice(nl + 1);
+      if (!line) continue;
+      const j = JSON.parse(line);
+      if (j.error) throw new Error('Ollama: ' + j.error);
+      content += j.message?.content || '';
+      if (j.done) last = j;
+    }
+  }
+  return { ...last, message: { role: 'assistant', content } };
 }
