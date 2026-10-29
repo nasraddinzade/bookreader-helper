@@ -1,6 +1,7 @@
 // Локальный сервер: API, SSE и собранный фронтенд. Слушает только 127.0.0.1.
 
 import fs from 'node:fs';
+import { spawn } from 'node:child_process';
 import Fastify from 'fastify';
 import fastifyStatic from '@fastify/static';
 import multipart from '@fastify/multipart';
@@ -281,6 +282,10 @@ if (fs.existsSync(DIST_DIR)) {
 
 await app.listen({ host: HOST, port: PORT });
 console.log(`Book reader: http://${HOST}:${PORT}  (данные: ${DATA_DIR})`);
+// --open: открыть читалку в браузере, когда сервер уже слушает (так запускает ярлык).
+if (process.argv.includes('--open')) {
+  spawn('cmd', ['/c', 'start', '', `http://${HOST}:${PORT}/`], { windowsHide: true, detached: true, stdio: 'ignore' }).unref();
+}
 
 bus.on('event', (ev) => { if (ev.type === 'chapter-done' || ev.type === 'settings' || ev.type === 'position') kickTts(); });
 kickTts();
