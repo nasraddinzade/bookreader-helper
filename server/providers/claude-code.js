@@ -8,6 +8,8 @@ import fs from 'node:fs';
 import path from 'node:path';
 import { DATA_DIR } from '../config.js';
 import { systemPromptFor, buildUserMessage, parseJsonResponse, extractSentences } from './prompt.js';
+import { fastSystemPrompt, buildFastMessage, parseFast, dictSystemPrompt, buildDictMessage, parseDict } from './prompt-fast.js';
+import { mapUnits, toUnits } from '../gloss-fast.js';
 import { ProviderError, limitError, authError, unavailableError } from './errors.js';
 
 const WORK_DIR = path.join(DATA_DIR, 'claude-work');
@@ -34,9 +36,8 @@ export function cleanEnv() {
   return env;
 }
 
-function promptFile(src, tgt) {
-  const file = path.join(WORK_DIR, `gloss-${src}-${tgt}.txt`);
-  const text = systemPromptFor(src, tgt);
+function promptFile(name, text) {
+  const file = path.join(WORK_DIR, `${name}.txt`);
   if (!fs.existsSync(file) || fs.readFileSync(file, 'utf8') !== text) fs.writeFileSync(file, text);
   return file;
 }
@@ -60,8 +61,13 @@ function parseResetAt(msg) {
 
 function classify(message) {
   const msg = String(message || '');
-  if (/usage limit|limit reached|rate.?limit|429|quota|too many requests|hit your limit|weekly limit|session limit/i.test(msg)) {
+  if (/usage limit|limit reached|hit your limit|weekly limit|session limit|quota|resets? (at )?\d/i.test(msg)) {
     return limitError('Достигнут лимит подписки Claude: ' + msg.slice(0, 200), parseResetAt(msg));
+  }
+  // Кратковременное ограничение частоты (много параллельных запросов): подождать и повторить,
+  // не ставя очередь на долгую паузу.
+  if (/rate.?limit|429|too many requests/i.test(msg)) {
+    return new ProviderError('Claude просит снизить частоту запросов: ' + msg.slice(0, 160), { kind: 'busy', retryable: true });
   }
   if (/authenticat|401|oauth|log ?in|not logged|invalid api key|credentials/i.test(msg)) {
     return authError('Claude Code не авторизован. Выполните в терминале: claude auth login (' + msg.slice(0, 160) + ')');
@@ -140,8 +146,7 @@ function runClaude(args, input, signal) {
   });
 }
 
-export function claudeCodeProvider({ model = 'sonnet', effort = 'low', src = 'en', tgt = 'ru' } = {}) {
-  const file = promptFile(src, tgt);
+const baseArgs = (model, file, effort) => {
   const args = [
     '-p',
     '--model', model,
@@ -153,31 +158,81 @@ export function claudeCodeProvider({ model = 'sonnet', effort = 'low', src = 'en
     '--setting-sources', '',
   ];
   if (effort) args.push('--effort', effort);
+  return args;
+};
 
-  async function call(userMessage, signal) {
-    const j = await runClaude(args, userMessage, signal);
-    if (j.is_error || j.subtype !== 'success') throw classify(j.result || j.error || j.subtype);
-    if (typeof j.result !== 'string' || !j.result.trim()) throw new ProviderError('Пустой ответ Claude', { retryable: true });
-    return j;
+async function call(args, userMessage, signal) {
+  const j = await runClaude(args, userMessage, signal);
+  if (j.is_error || j.subtype !== 'success') throw classify(j.result || j.error || j.subtype);
+  if (typeof j.result !== 'string' || !j.result.trim()) throw new ProviderError('Пустой ответ Claude', { retryable: true });
+  return j;
+}
+
+const notJson = (e, n) => new ProviderError('Ответ Claude не JSON (возможно, обрезан): ' + e.message, { retryable: true, reduceBatch: n > 1 });
+
+/**
+ * Быстрый режим: сопоставляет элементы ответа с предложениями по словам, а не по позиции
+ * (модель может пропустить предложение). Для каждого предложения берётся элемент рядом
+ * с ожидаемым номером, у которого больше всего слов нашлось в предложении.
+ */
+function matchFast(texts, items, src, tgt) {
+  const used = new Set();
+  return texts.map((text, i) => {
+    let best = null;
+    for (let j = Math.max(0, i - 3); j <= Math.min(items.length - 1, i + 3); j++) {
+      if (used.has(j) || !items[j]?.g) continue;
+      const m = mapUnits(text, toUnits(items[j].g), src, tgt);
+      if (!best || m.coverage > best.m.coverage) best = { j, m };
+      if (m.coverage === 1) break;
+    }
+    if (!best) return null;
+    used.add(best.j);
+    return { full: items[best.j].f, tokens: best.m.tokens, coverage: best.m.coverage, fast: true };
+  });
+}
+
+const MIN_COVERAGE = 0.7; // ниже — предложение переспрашивается отдельно
+
+export function claudeCodeProvider({ model = 'sonnet', effort = 'low', mode = 'fast', src = 'en', tgt = 'ru' } = {}) {
+  if (mode === 'full') {
+    const args = baseArgs(model, promptFile(`gloss-${src}-${tgt}`, systemPromptFor(src, tgt)), effort);
+    return {
+      id: 'claude-code',
+      name: `claude-code:${model}`,
+      model,
+      maxBatch: 12,
+      async glossBatch(texts, { signal } = {}) {
+        const j = await call(args, buildUserMessage(texts), signal);
+        let parsed;
+        try { parsed = parseJsonResponse(j.result); } catch (e) { throw notJson(e, texts.length); }
+        return extractSentences(parsed, texts.length);
+      },
+    };
   }
 
+  const args = baseArgs(model, promptFile(`gloss-fast-${src}-${tgt}`, fastSystemPrompt(src, tgt)), effort);
   return {
     id: 'claude-code',
-    name: `claude-code:${model}`,
+    name: `claude-code:${model}:fast`,
     model,
+    fast: true, // словарные значения (base) заполняются отдельно, через словарь лемм
+    maxBatch: 60,
     async glossBatch(texts, { signal } = {}) {
-      const j = await call(buildUserMessage(texts), signal);
-      let parsed;
-      try { parsed = parseJsonResponse(j.result); } catch (e) {
-        throw new ProviderError('Ответ Claude не JSON (возможно, обрезан): ' + e.message, { retryable: true, reduceBatch: texts.length > 1 });
-      }
-      return extractSentences(parsed, texts.length);
-    },
-    /** Короткая проверка входа: 1 предложение. */
-    async ping({ signal } = {}) {
-      return this.glossBatch(['Hello.'], { signal });
+      const j = await call(args, buildFastMessage(texts), signal);
+      let items;
+      try { items = parseFast(j.result); } catch (e) { throw notJson(e, texts.length); }
+      const matched = matchFast(texts, items, src, tgt);
+      // Одно предложение — отдаём как есть; в пачке слабые совпадения уходят на повтор по одному.
+      return matched.filter((m) => m && (texts.length === 1 || m.coverage >= MIN_COVERAGE));
     },
   };
+}
+
+/** Словарные значения лемм: { lemma: 'значение, значение' }. */
+export async function claudeDictionary(lemmas, { model = 'haiku', src = 'en', tgt = 'ru', signal } = {}) {
+  const args = baseArgs(model, promptFile(`dict-${src}-${tgt}`, dictSystemPrompt(src, tgt)), 'low');
+  const j = await call(args, buildDictMessage(lemmas), signal);
+  try { return parseDict(j.result); } catch (e) { throw notJson(e, lemmas.length); }
 }
 
 /** Короткий текстовый запрос (перевод выделения, если нет Ollama и встроенного переводчика браузера). */

@@ -3,6 +3,7 @@
 
 import { db, today } from './db.js';
 import { wordKey } from '../shared/wordkey.js';
+import { dictBase } from './queue/dictionary.js';
 
 export { wordKey };
 
@@ -74,6 +75,8 @@ export function saveItem({ kind = 'word', lang = 'en', tgt = 'ru', text, lemma =
   const cleanText = trimPunct(text);
   const key = keyFor(kind, { text: cleanText, lemma });
   if (!key) throw new Error('Пустое слово');
+  // Быстрый режим: словарное значение могло ещё не прийти в карточку — берём из словаря лемм.
+  if (!base && kind === 'word') base = dictBase(lang, tgt, lemma);
   return db.transaction(() => {
     let row = db.prepare('SELECT * FROM vocab WHERE kind = ? AND lang = ? AND key = ?').get(kind, lang, key);
     let created = false;

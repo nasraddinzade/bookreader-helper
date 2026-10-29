@@ -39,7 +39,7 @@ const clean = (t) => ({ en: t.en, gap: t.gap ?? '', ctx: t.ctx || '', lemma: t.l
 /** { gloss, aligned } — gloss с точными срезами оригинала, если выравнивание прошло. */
 export function finalize(sentence, gloss) {
   const a = alignTokens(sentence, gloss.tokens);
-  if (a.ok) return { aligned: true, gloss: { full: gloss.full, tokens: a.tokens.map(clean) } };
+  if (a.ok) return { aligned: true, gloss: { full: gloss.full, tokens: a.tokens.map(clean), ...(gloss.fast ? { fast: true } : {}) } };
   return { aligned: false, reason: a.reason, gloss };
 }
 

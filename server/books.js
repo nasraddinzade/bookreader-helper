@@ -4,6 +4,7 @@ import fs from 'node:fs';
 import path from 'node:path';
 import { db } from './db.js';
 import { BOOKS_DIR, AUDIO_DIR } from './config.js';
+import { fillBases } from './queue/dictionary.js';
 
 const stats = db.prepare(`
   SELECT book_id,
@@ -79,17 +80,26 @@ const chapterSentences = db.prepare(`
 export function getChapter(bookId, idx) {
   const c = chapterByIdx.get(bookId, idx);
   if (!c) return null;
-  const sentences = chapterSentences.all(c.id).map((s) => ({
-    id: s.id,
-    idx: s.idx,
-    para: s.para,
-    kind: s.kind,
-    text: s.text,
-    status: s.status,
-    gloss: s.gloss ? JSON.parse(s.gloss) : null,
-    error: s.error || null,
-    audio: !!s.audio,
-  }));
+  const book = getBookRow(bookId);
+  const sentences = chapterSentences.all(c.id).map((s) => {
+    const gloss = s.gloss ? JSON.parse(s.gloss) : null;
+    // Быстрый режим хранит переводы без словарных значений — они берутся из словаря лемм.
+    if (gloss?.fast) {
+      fillBases(book.lang, book.target_lang, gloss.tokens);
+      for (const t of gloss.tokens) if (!t.base && t.pos === 'name') t.base = t.ctx;
+    }
+    return {
+      id: s.id,
+      idx: s.idx,
+      para: s.para,
+      kind: s.kind,
+      text: s.text,
+      status: s.status,
+      gloss,
+      error: s.error || null,
+      audio: !!s.audio,
+    };
+  });
   return { idx: c.idx, title: c.title, total: c.n_sentences, sentences };
 }
 

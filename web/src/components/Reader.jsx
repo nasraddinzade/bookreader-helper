@@ -211,12 +211,15 @@ export default function Reader({ param }) {
 
   // Живое обновление: переведённые предложения текущей главы подгружаются по событиям сервера.
   useServerEvents((ev) => {
-    if (ev.bookId !== bookId) return;
-    if ((ev.type === 'sentence' || ev.type === 'audio') && ev.chapter === chapterIdx) {
+    const refetch = (ms) => {
       if (!refetchTimer.current) {
-        refetchTimer.current = setTimeout(() => { refetchTimer.current = null; loadChapter(chapterIdx).catch(() => {}); }, 800);
+        refetchTimer.current = setTimeout(() => { refetchTimer.current = null; loadChapter(chapterIdx).catch(() => {}); }, ms);
       }
-    }
+    };
+    // Словарь лемм дополнился — у слов главы появились словарные значения.
+    if (ev.type === 'dict') { refetch(3000); return; }
+    if (ev.bookId !== bookId) return;
+    if ((ev.type === 'sentence' || ev.type === 'audio') && ev.chapter === chapterIdx) refetch(800);
     if (ev.type === 'chapter-done' || ev.type === 'queue') loadBook();
   });
 

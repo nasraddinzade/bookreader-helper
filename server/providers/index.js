@@ -33,6 +33,6 @@ export function createProvider(settings, src = 'en', tgt = 'ru') {
       return { cacheable: true, ...ollamaProvider({ model: settings.ollamaModel, threads: settings.ollamaThreads, src, tgt }) };
     case 'claude-code':
     default:
-      return { cacheable: true, ...claudeCodeProvider({ model: settings.claudeModel, effort: settings.claudeEffort, src, tgt }) };
+      return { cacheable: true, ...claudeCodeProvider({ model: settings.claudeModel, effort: settings.claudeEffort, mode: settings.glossMode, src, tgt }) };
   }
 }

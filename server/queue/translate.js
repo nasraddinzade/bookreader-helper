@@ -7,11 +7,14 @@ import { db, getSettings, updateSettings } from '../db.js';
 import { emit } from '../events.js';
 import { createProvider } from '../providers/index.js';
 import { matchResults, finalize, repairTokens } from '../gloss.js';
+import { kickDictionary } from './dictionary.js';
 
 const MAX_ATTEMPTS = 3;
-// Пачка ограничена и числом слов: глоссы — это ~30 выходных токенов на слово, и пачка
-// из 12 длинных предложений генерировалась бы дольше 10 минут. 250 слов ≈ 8 тыс. токенов ≈ 1,5 мин.
-const WORDS_PER_BATCH = 250;
+// Пачка ограничена и числом слов. В полном режиме модель пишет ~30 токенов на слово:
+// 250 слов ≈ 8 тыс. токенов ≈ 1,5 мин. В быстром ~8 токенов на слово: 900 слов ≈ 7 тыс. токенов.
+const WORDS_PER_BATCH = { fast: 900, full: 250 };
+// Первая пачка главы, которую сейчас читают, — короткая, чтобы перевод появился через ~20 секунд.
+const FIRST_BATCH = 10;
 const AUTH_RECHECK_MS = 2 * 60 * 1000;
 const RATE_WINDOW_MS = 20 * 60 * 1000;
 
@@ -47,6 +50,9 @@ const saveFail = db.prepare(`UPDATE sentences SET attempts = attempts + 1, error
   status = CASE WHEN attempts + 1 >= ${MAX_ATTEMPTS} THEN 'error' ELSE 'pending' END WHERE id = ?`);
 const chapterLeft = db.prepare(`SELECT COUNT(*) AS n FROM sentences s JOIN chapters c ON c.id = s.chapter_id
   WHERE c.book_id = ? AND c.idx = ? AND s.status != 'done'`);
+const chapterDoneCount = db.prepare(`SELECT COUNT(*) AS n FROM sentences s JOIN chapters c ON c.id = s.chapter_id
+  WHERE c.book_id = ? AND c.idx = ? AND s.status = 'done'`);
+const addLemma = db.prepare('INSERT OR IGNORE INTO lemma_dict (lang, tgt, lemma, base, at) VALUES (?, ?, ?, NULL, ?)');
 const pendingCounts = db.prepare(`SELECT book_id, COUNT(*) AS n FROM sentences WHERE status = 'pending' GROUP BY book_id`);
 
 const cacheKey = (provider, src, tgt, hash) => `${provider.name}|${src}>${tgt}|${hash}`;
@@ -56,7 +62,7 @@ const cacheKey = (provider, src, tgt, hash) => `${provider.name}|${src}>${tgt}|$
 let providerMemo = { sig: '', provider: null };
 function providerFor(book) {
   const s = getSettings();
-  const sig = [s.provider, s.claudeModel, s.claudeEffort, s.ollamaModel, s.ollamaThreads, book.lang, book.target_lang].join('|');
+  const sig = [s.provider, s.claudeModel, s.claudeEffort, s.glossMode, s.ollamaModel, s.ollamaThreads, book.lang, book.target_lang].join('|');
   if (providerMemo.sig !== sig) providerMemo = { sig, provider: createProvider(s, book.lang, book.target_lang) };
   return providerMemo.provider;
 }
@@ -71,7 +77,7 @@ function setStatus(status, message = '', resumeAt = null) {
   if (changed) emit('queue', { status });
 }
 
-function blocked() {
+export function blocked() {
   if (getSettings().translationPaused) return true;
   return state.status === 'limited' || state.status === 'auth';
 }
@@ -89,18 +95,23 @@ function wakeAt(ms) {
 function pickJob() {
   const s = getSettings();
   // Локальной 8B-модели на CPU большие пачки не по силам: ответ обрезается и прогресс виден реже.
-  const cap = s.provider === 'ollama' ? 6 : 30;
-  const batchSize = Math.max(1, Math.min(cap, Number(s.batchSize) || 12));
+  const fast = s.provider === 'claude-code' && s.glossMode !== 'full';
+  const cap = s.provider === 'ollama' ? 6 : fast ? 60 : 12;
+  const batchSize = Math.max(1, Math.min(cap, Number(s.batchSize) || 40));
+  const wordBudget = fast ? WORDS_PER_BATCH.fast : WORDS_PER_BATCH.full;
   for (const book of booksToTranslate.all()) {
     const rows = pendingForBook.all(book.id, book.pos_chapter, batchSize + state.inflight.size + 1)
       .filter((r) => !state.inflight.has(r.id));
     if (!rows.length) continue;
     const chapter = rows[0].chapter;
+    const startingChapter = chapter === book.pos_chapter && chapterDoneCount.get(book.id, chapter).n === 0
+      && ![...state.active.values()].some((a) => a.bookId === book.id && a.chapter === chapter);
+    const limit = startingChapter ? Math.min(FIRST_BATCH, batchSize) : batchSize;
     const items = [];
     let words = 0;
-    for (const r of rows.filter((x) => x.chapter === chapter).slice(0, batchSize)) {
+    for (const r of rows.filter((x) => x.chapter === chapter).slice(0, limit)) {
       const w = r.text.split(/\s+/).length;
-      if (items.length && words + w > WORDS_PER_BATCH) break;
+      if (items.length && words + w > wordBudget) break;
       items.push(r);
       words += w;
     }
@@ -113,6 +124,15 @@ function pickJob() {
 
 function store(job, item, gloss, by, provider) {
   saveDone.run(JSON.stringify(gloss), by, item.id);
+  // Быстрый режим не даёт словарных значений: леммы без base уходят в словарь лемм.
+  if (gloss.fast) {
+    const now = Date.now();
+    for (const t of gloss.tokens) {
+      if (t.base || !t.lemma || t.pos === 'name' || !/\p{L}/u.test(t.lemma)) continue;
+      addLemma.run(job.book.lang, job.book.target_lang, t.lemma.toLowerCase(), now);
+    }
+    kickDictionary();
+  }
   if (provider?.cacheable && by !== 'cache') {
     cachePut.run(cacheKey(provider, job.book.lang, job.book.target_lang, item.hash), JSON.stringify(gloss), Date.now());
   }
@@ -134,6 +154,7 @@ async function translateItems(job, items, provider, depth = 0) {
   } catch (e) {
     if (e.kind === 'limit') { setStatus('limited', e.message, e.resumeAt); wakeAt(e.resumeAt); return false; }
     if (e.kind === 'auth' || e.kind === 'unavailable') { setStatus('auth', e.message); wakeAt(Date.now() + AUTH_RECHECK_MS); return false; }
+    if (e.kind === 'busy') { await sleep(20000); return true; } // предложения остаются в очереди
     if (e.reduceBatch && items.length > 1) {
       const half = Math.ceil(items.length / 2);
       return (await translateItems(job, items.slice(0, half), provider, depth)) && translateItems(job, items.slice(half), provider, depth);
@@ -242,10 +263,11 @@ export function pump() {
   }
   if (state.status === 'paused' || state.status === 'error') setStatus('idle');
   if (blocked()) return;
-  const want = getSettings().provider === 'claude-code' ? Math.max(1, Math.min(4, Number(getSettings().parallel) || 1)) : 1;
+  const want = getSettings().provider === 'claude-code' ? Math.max(1, Math.min(10, Number(getSettings().parallel) || 1)) : 1;
   // Воркер без работы завершается синхронно, поэтому число запусков считаем заранее.
   const start = want - state.workers;
   for (let i = 0; i < start; i++) worker();
+  kickDictionary(); // словарь лемм мог остаться недозаполненным после перезапуска
 }
 
 /** Кладёт в кэш выровненные переводы (например, из замера скорости), чтобы очередь их не запрашивала. */

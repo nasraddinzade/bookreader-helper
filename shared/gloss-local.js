@@ -47,6 +47,16 @@ function posOf(tags) {
 
 const stripPunct = (s) => s.replace(/^[^\p{L}\p{N}]+|[^\p{L}\p{N}]+$/gu, '');
 
+const infinitiveMemo = new Map();
+function infinitive(word) {
+  if (!infinitiveMemo.has(word)) {
+    let inf = word;
+    try { inf = nlp(word).verbs().toInfinitive().text().toLowerCase() || word; } catch { /* оставляем как есть */ }
+    infinitiveMemo.set(word, inf);
+  }
+  return infinitiveMemo.get(word);
+}
+
 /**
  * Разбирает предложение на токены. Для английского — через compromise: леммы, части речи,
  * фразовые глаголы и правила для служебных слов (правила только при переводе на русский).
@@ -150,6 +160,8 @@ function analyzeEnglish(sentence, toRussian) {
       if (t.implicit) return t.implicit;
       const n = t.normal || stripPunct(t.text).toLowerCase();
       if (BE[n]) return 'be';
+      // У глагола в составе фразового («got back») compromise не всегда даёт root.
+      if (!t.root && t.tags?.includes('Verb') && !t.tags.includes('Particle')) return infinitive(n);
       return t.root || n;
     });
     let lemma = termLemmas.filter(Boolean).join(' ').replace(/^i\b/, 'I') || lower;

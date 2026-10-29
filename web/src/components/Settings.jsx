@@ -173,6 +173,14 @@ export default function Settings() {
           </select>
         </label>
         {(s.provider || 'claude-code') === 'claude-code' && (
+          <label>Режим
+            <select value={s.glossMode || 'fast'} onChange={set('glossMode')}>
+              <option value="fast">быстрый — разбивка и леммы локально, модель даёт переводы (~4× быстрее)</option>
+              <option value="full">полный — модель размечает всё сама, включая словарные значения</option>
+            </select>
+          </label>
+        )}
+        {(s.provider || 'claude-code') === 'claude-code' && (
           <div className="form-grid3">
             <label>Модель
               <select value={s.claudeModel || 'sonnet'} onChange={set('claudeModel')}>
@@ -189,17 +197,20 @@ export default function Settings() {
               </select>
             </label>
             <label>Параллельных запросов
-              <input type="number" min="1" max="4" value={s.parallel ?? 2} onChange={set('parallel')} />
+              <input type="number" min="1" max="10" value={s.parallel ?? 10} onChange={set('parallel')} />
             </label>
           </div>
         )}
         {s.provider === 'ollama' && <OllamaSection s={s} set={set} />}
         <label>Размер пачки (предложений за запрос)
-          <input type="number" min="1" max="30" value={s.batchSize ?? 12} onChange={set('batchSize')} />
+          <input type="number" min="1" max="60" value={s.batchSize ?? 40} onChange={set('batchSize')} />
         </label>
         <p className="muted small">
           Claude Code вызывается в headless-режиме по вашей подписке, без API-ключа. Если подписка упрётся в лимит,
-          очередь встанет на паузу и продолжит сама после сброса лимита.
+          очередь встанет на паузу и продолжит сама после сброса лимита. Каждый параллельный запрос — отдельный
+          процесс claude (~200 МБ памяти); больше запросов — быстрее, но лимит подписки расходуется быстрее.
+          В полном режиме пачка не больше 12 предложений, в быстром словарные значения слов догружаются
+          отдельно (модель {s.dictModel || 'haiku'}) и кэшируются для всех книг.
         </p>
       </section>
 

@@ -118,6 +118,21 @@ const MIGRATIONS = [
     value TEXT NOT NULL
   );
   `,
+  // 2: словарь лемм (значения base запрашиваются один раз на лемму для всех книг);
+  //    быстрый режим перевода меняет размер пачки и параллельность по умолчанию.
+  `
+  CREATE TABLE lemma_dict (
+    lang TEXT NOT NULL,
+    tgt TEXT NOT NULL,
+    lemma TEXT NOT NULL,
+    base TEXT,
+    tries INTEGER NOT NULL DEFAULT 0,
+    at INTEGER NOT NULL,
+    PRIMARY KEY (lang, tgt, lemma)
+  );
+  CREATE INDEX lemma_dict_pending ON lemma_dict (base) WHERE base IS NULL;
+  DELETE FROM settings WHERE key IN ('batchSize', 'parallel');
+  `,
 ];
 
 {
@@ -138,8 +153,10 @@ export const DEFAULT_SETTINGS = {
   translationPaused: false,
   claudeModel: 'sonnet', // sonnet | haiku | opus
   claudeEffort: 'low',
-  batchSize: 12,
-  parallel: 2, // одновременных запросов к claude -p
+  glossMode: 'fast', // fast — токены локально, модель даёт только переводы; full — модель размечает всё сама
+  dictModel: 'haiku', // модель для словарных значений лемм
+  batchSize: 40, // предложений в пачке (в режиме full — до 12)
+  parallel: 10, // одновременных запросов к claude -p (замер: 8 → ~2800 слов/мин)
   ollamaModel: 'qwen3:8b',
   ollamaThreads: 6,
   ttsEnabled: true,
