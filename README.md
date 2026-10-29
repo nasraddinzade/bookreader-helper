@@ -18,7 +18,7 @@ npm start
 окне и открывает читалку в браузере; если сервер уже запущен — просто открывает читалку. Закрытие окна сервера его останавливает.
 
 - Данные (книги, база, аудио, модели) — в `D:\bookreader-data` (другая папка — переменная `BOOKREADER_DATA`).
-- Перевод через Claude Code требует входа CLI по подписке (один раз): `powershell -ExecutionPolicy Bypass -File scriptsclaude-login.ps1`
+- Перевод через Claude Code требует входа CLI по подписке (один раз): `powershell -ExecutionPolicy Bypass -File scripts/claude-login.ps1`
   — это `claude auth login` с очищенным окружением (без переменных Claude Desktop и ANTHROPIC_*).
 - Для разработки: `npm run dev` (Vite на 5173 с прокси к серверу на 5180). Тесты: `npm test`.
 
