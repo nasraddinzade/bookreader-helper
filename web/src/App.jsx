@@ -1,4 +1,6 @@
+import { useEffect } from 'react';
 import { useRoute } from './lib/route.js';
+import { useSettings } from './lib/settings.js';
 import Library from './components/Library.jsx';
 import Reader from './components/Reader.jsx';
 import Vocab from './components/Vocab.jsx';
@@ -15,6 +17,12 @@ const NAV = [
 
 export default function App() {
   const { page, param } = useRoute();
+  const { theme } = useSettings();
+  // Тема: пергамент / ночная библиотека; «авто» — по настройке системы.
+  useEffect(() => {
+    if (theme === 'light' || theme === 'dark') document.documentElement.dataset.theme = theme;
+    else delete document.documentElement.dataset.theme;
+  }, [theme]);
   let screen;
   switch (page) {
     case 'read': screen = <Reader key={param.split('/')[0]} param={param} />; break;

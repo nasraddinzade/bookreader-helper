@@ -99,6 +99,16 @@ export default function Reader({ param }) {
   const settings = useSettings();
   const hintMode = settings.hintMode || 'visible';
   const ruMode = settings.ruColumn || 'show';
+  const immersive = !!settings.immersive;
+  const fontScale = Math.min(1.6, Math.max(0.8, Number(settings.fontScale) || 1));
+
+  // Режим погружения прячет верхнюю панель приложения — она вне читалки, поэтому класс на body.
+  useEffect(() => {
+    document.body.classList.toggle('immersive', immersive);
+    return () => document.body.classList.remove('immersive');
+  }, [immersive]);
+  const toggleImmersive = () => updateSettings({ immersive: !getSettings().immersive });
+  const changeScale = (d) => updateSettings({ fontScale: Math.round(Math.min(1.6, Math.max(0.8, (Number(getSettings().fontScale) || 1) + d)) * 100) / 100 });
   const [book, setBook] = useState(null);
   const [error, setError] = useState('');
   const [chapterIdx, setChapterIdx] = useState(null);
@@ -231,8 +241,15 @@ export default function Reader({ param }) {
       const k = e.key.toLowerCase();
       if (k === 'h' || k === 'р') { e.preventDefault(); cycleHintMode(); }
       else if (k === 't' || k === 'е') { e.preventDefault(); toggleRuColumn(); }
-      else if (e.key === 'Escape') { setTapped(null); setTocOpen(false); setCard(null); }
+      else if (e.key === 'Escape') {
+        // Сначала закрываются всплывающие окна, следующий Esc выводит из режима погружения.
+        if (!card && !tocOpen && !tapped && immersive) toggleImmersive();
+        setTapped(null); setTocOpen(false); setCard(null);
+      }
       else if (k === 'a' || k === 'ф') { e.preventDefault(); toggleAudiobook(); }
+      else if (k === 'f' || k === 'а') { e.preventDefault(); toggleImmersive(); }
+      else if (e.key === '+' || e.key === '=') { e.preventDefault(); changeScale(0.05); }
+      else if (e.key === '-' || e.key === '_') { e.preventDefault(); changeScale(-0.05); }
       else if (ab.active && e.key === 'ArrowDown' && e.shiftKey) { e.preventDefault(); seekAudiobook(1); }
       else if (ab.active && e.key === 'ArrowUp' && e.shiftKey) { e.preventDefault(); seekAudiobook(-1); }
       else if (e.altKey && e.key === 'ArrowRight') goChapter(1);
@@ -333,7 +350,7 @@ export default function Reader({ param }) {
   if (!book) return <div className="page"><p className="muted">Загрузка…</p></div>;
 
   return (
-    <div className={`reader mode-${hintMode} ru-${ruMode}`}>
+    <div className={`reader mode-${hintMode} ru-${ruMode}${immersive ? ' immersive' : ''}`} style={{ '--scale': fontScale }}>
       <div className="reader-bar">
         <button className="small" onClick={() => setTocOpen((v) => !v)} title="Оглавление и закладки">☰ Главы</button>
         <div className="reader-title" title={`${book.title} — ${chInfo?.title || ''}`}>
@@ -353,6 +370,9 @@ export default function Reader({ param }) {
           <button className="small" onClick={() => goChapter(-1)} disabled={!chapterIdx} title="Предыдущая глава (Alt+←)">‹</button>
           <button className="small" onClick={() => goChapter(1)} disabled={chapterIdx >= book.chapters.length - 1} title="Следующая глава (Alt+→)">›</button>
           <button className="small" onClick={addBookmark} title="Закладка на текущем предложении">🔖</button>
+          <button className="small" onClick={() => changeScale(-0.05)} title="Мельче (клавиша −)">A−</button>
+          <button className="small" onClick={() => changeScale(0.05)} title="Крупнее (клавиша +)">A+</button>
+          <button className={`small${immersive ? ' active' : ''}`} onClick={toggleImmersive} title="Режим погружения: только текст (клавиша F)">❦ Погружение</button>
           <span className={`audiobook${ab.active ? ' on' : ''}`}>
             <button className={`small${ab.playing ? ' active' : ''}`} onClick={toggleAudiobook} title="Аудиокнига: читать главу вслух (клавиша A)">
               {ab.playing ? '⏸' : '🎧'}{ab.active ? '' : ' Аудиокнига'}
@@ -404,6 +424,18 @@ export default function Reader({ param }) {
 
       {!chapter ? <p className="muted">Загрузка главы…</p> : (
         <div className="rows" lang={book.lang}>
+          {/* Заглавие: название книги и виньетка; сам заголовок главы — первые строки текста. */}
+          {immersive && (
+            <div className="immersive-dock">
+              <button className="small" onClick={() => setTocOpen(true)} title="Оглавление и закладки">☰</button>
+              <button className={`small${ab.playing ? ' active' : ''}`} onClick={toggleAudiobook} title="Аудиокнига (клавиша A)">{ab.playing ? '⏸' : '🎧'}</button>
+              <button className="small" onClick={toggleImmersive} title="Выйти из режима погружения (F или Esc)">❦ выйти</button>
+            </div>
+          )}
+          <header className="chapter-head">
+            <div className="ch-num">{book.title}</div>
+            <div className="ornament">❦</div>
+          </header>
           {rows.map((s, i) => (
             <Row
               key={s.id}
@@ -427,6 +459,7 @@ export default function Reader({ param }) {
           )}
           <SelectionPopover book={book} chapter={chapter} getSentence={getSentence} />
           <div className="chapter-end">
+            <div className="ornament">✦ ❦ ✦</div>
             {chapterIdx < book.chapters.length - 1 ? (
               <button className="primary" onClick={() => goChapter(1)}>Следующая глава: {book.chapters[chapterIdx + 1].title} ›</button>
             ) : <span className="muted">Конец книги</span>}

@@ -1,37 +1,4 @@
-:root {
-  --bg: #ffffff;
-  --bg2: #f5f5f3;
-  --fg: #1c1c1c;
-  --fg2: #3a3a3a;
-  --muted: #7a7a7a;
-  --line: #e4e4e0;
-  --accent: #2f5fd0;
-  --accent-bg: #e8eefb;
-  --saved-bg: #fff3c4;
-  --speak-bg: #d9f0e3;
-  --danger: #c0392b;
-  --ok: #1e8449;
-  --tip-bg: #222;
-  --tip-fg: #fff;
-  --radius: 6px;
-  color-scheme: light dark;
-}
-@media (prefers-color-scheme: dark) {
-  :root {
-    --bg: #17181a;
-    --bg2: #202124;
-    --fg: #e8e8e6;
-    --fg2: #cfcfcb;
-    --muted: #8f8f8a;
-    --line: #2d2e31;
-    --accent: #7ea2ff;
-    --accent-bg: #223052;
-    --saved-bg: #4a3f12;
-    --speak-bg: #1e3a2a;
-    --tip-bg: #f0f0f0;
-    --tip-fg: #111;
-  }
-}
+/* Цвета, шрифты и оформление — в theme.css. */
 
 * { box-sizing: border-box; }
 html, body { margin: 0; padding: 0; }
@@ -289,8 +256,6 @@ textarea { resize: vertical; line-height: 1.4; }
 .bm-list button.link { flex: 1; text-align: left; color: var(--fg); font-size: 0.9rem; }
 
 /* ---- Фаза 2: подсветка, очередь, выделение ---- */
-:root { --phrase-bg: #dff1ff; }
-@media (prefers-color-scheme: dark) { :root { --phrase-bg: #173a52; } }
 .tok.saved-phrase { background: var(--phrase-bg); border-radius: 0; }
 .tok.saved.saved-phrase { background: linear-gradient(var(--saved-bg), var(--phrase-bg)); }
 .row.speaking .en { background: var(--speak-bg); border-radius: 4px; }

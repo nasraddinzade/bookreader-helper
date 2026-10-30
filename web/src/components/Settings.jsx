@@ -218,6 +218,19 @@ export default function Settings() {
 
       <section>
         <h2>Чтение</h2>
+        <div className="form-grid3">
+          <label>Оформление
+            <select value={s.theme || 'auto'} onChange={set('theme')}>
+              <option value="auto">как в системе</option>
+              <option value="light">пергамент (светлая)</option>
+              <option value="dark">ночная библиотека (тёмная)</option>
+            </select>
+          </label>
+          <label>Размер текста: {Math.round((s.fontScale || 1) * 100)} % (клавиши + и −)
+            <input type="range" min="0.8" max="1.6" step="0.05" value={s.fontScale || 1} onChange={set('fontScale')} />
+          </label>
+          <label className="check"><input type="checkbox" checked={!!s.immersive} onChange={set('immersive')} /> Режим погружения (клавиша F)</label>
+        </div>
         <label>Подсказки над словами (клавиша H)
           <select value={s.hintMode || 'visible'} onChange={set('hintMode')}>
             {HINT_MODES.map((m) => <option key={m} value={m}>{HINT_MODE_LABELS[m]}</option>)}

@@ -165,6 +165,9 @@ export const DEFAULT_SETTINGS = {
   ttsThreads: 4,
   ttsDtype: 'fp32', // fp32 на этом CPU быстрее q8
   ttsPaused: false,
+  theme: 'auto', // auto | light (пергамент) | dark (ночная библиотека)
+  immersive: false, // режим погружения в читалке
+  fontScale: 1, // размер текста книги
   hintMode: 'visible', // visible | hover | off
   ruColumn: 'show', // show | hide | click
 };

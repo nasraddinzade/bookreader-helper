@@ -64,13 +64,15 @@ export default function Library() {
 
   return (
     <div className="page">
-      <div className="page-head">
+      <header className="library-head">
         <h1>Библиотека</h1>
-        <button className="primary" onClick={() => fileRef.current?.click()} disabled={!!upload}>Добавить книгу</button>
+        <div className="ornament">❦</div>
+        <p className="muted">Книги переводятся в фоне — читать можно с первых готовых глав.</p>
+        <button className="primary big" onClick={() => fileRef.current?.click()} disabled={!!upload}>✦ Добавить книгу</button>
         <input ref={fileRef} type="file" accept=".epub,.fb2,.zip,.txt" hidden onChange={onFile} />
-      </div>
-      <p className="muted small">EPUB, FB2 или TXT. Книга переводится в фоне, читать можно с первых переведённых глав.</p>
-      <p className="lib-queue"><QueueStatus /></p>
+        <p className="muted small">EPUB, FB2 или TXT</p>
+        <p className="lib-queue"><QueueStatus /></p>
+      </header>
       {upload && (
         <p className="notice">{upload.phase}: {upload.name} {upload.phase === 'Загрузка' ? `${Math.round(upload.progress * 100)}%` : '…'}</p>
       )}
