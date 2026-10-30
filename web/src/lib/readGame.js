@@ -5,10 +5,11 @@
 
 import { useSyncExternalStore } from 'react';
 import { api } from './api.js';
+import { getSettings } from './settings.js';
 import { speakText, stopSpeaking } from './tts.js';
-import { ReadTracker, paragraphWords, sameWord, comboMultiplier } from '../../../shared/read-align.js';
+import { ReadTracker, paragraphWords, similarWord, comboMultiplier, STRICTNESS } from '../../../shared/read-align.js';
 
-const THRESHOLDS = { soft: 0.8, normal: 0.9, strict: 0.97 };
+const strictness = (name) => STRICTNESS[name] || STRICTNESS.normal;
 const FINAL_DELAY_MS = 350; // ждём «свободный» распознаватель, чтобы сверить отрезок по времени
 const NEXT_DELAY_MS = 1200; // пауза перед следующим абзацем
 
@@ -89,12 +90,13 @@ export class ReadGame {
     stopSpeaking();
     this.set({ phase: 'loading', para: target, error: '', notice, mistake: null, result: null, questions: null, qState: null, quizPoints: 0, tentative: 0, pops: [], chapterDone: false });
     try {
+      this.strictness = getSettings().readStrictness || this.strictness; // изменение в настройках действует сразу
       const sentences = this.chapter.sentences.filter((s) => s.para === target);
       const w = paragraphWords(sentences.map((s) => ({ id: s.id, text: s.text, tokens: tokensOf(s) })));
       const info = await api.post('/api/speech/words', { words: [...new Set(w.map((x) => x.w))] });
       const inVocab = new Map(info.map((x) => [x.word, x.inVocab]));
       for (const x of w) if (inVocab.get(x.w) === false) x.check = false;
-      this.tracker = new ReadTracker(w, { threshold: THRESHOLDS[this.strictness] || THRESHOLDS.normal });
+      this.tracker = new ReadTracker(w, strictness(this.strictness));
       this.tracker.skipUnchecked();
       window.__raTracker = this.tracker; // для отладки из консоли
       const sp = await speech();
@@ -223,7 +225,9 @@ export class ReadGame {
               if (!got && !(r.result || []).length) return; // тишина
               handled = true;
               this.stopListening();
-              if (got && (got.conf >= 0.85 || free.some((x) => sameWord(x.word, target)))) {
+              // Повтор засчитывается мягче, чем чтение: уверенность ниже порога или похожее слово у «свободного».
+              const cfg = strictness(this.strictness);
+              if ((got && got.conf >= cfg.threshold - 0.1) || free.some((x) => similarWord(x.word, target, cfg.similarity))) {
                 tr.fixed(i);
                 this.popAt(i, '+5');
                 this.resumeAfterMistake();

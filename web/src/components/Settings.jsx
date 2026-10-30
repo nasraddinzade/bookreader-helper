@@ -233,9 +233,9 @@ export default function Settings() {
         </div>
         <label>Испытание чтеца (клавиша R): строгость проверки произношения
           <select value={s.readStrictness || 'normal'} onChange={set('readStrictness')}>
-            <option value="soft">мягко — останавливает только на явных ошибках</option>
-            <option value="normal">обычно</option>
-            <option value="strict">строго — неуверенно прочитанное слово тоже ошибка</option>
+            <option value="soft">мягко — сильный акцент, останавливает только на явных ошибках</option>
+            <option value="normal">обычно — лёгкий акцент не считается ошибкой</option>
+            <option value="strict">строго — неуверенно прочитанное слово тоже ошибка, остановка сразу</option>
           </select>
         </label>
         <p className="muted small">

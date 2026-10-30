@@ -44,8 +44,8 @@ test('низкая уверенность, но «свободный» слыш�
   assert.ok(tr.done);
 });
 
-test('[unk] вместо слова — ошибка на нём; partial ловит её сразу, если чтение продолжилось', () => {
-  const tr = new ReadTracker(words());
+test('[unk] вместо слова — ошибка на нём; при строгой проверке partial ловит её сразу', () => {
+  const tr = new ReadTracker(words(), { earlyStop: true });
   const i = ALL.indexOf('remarkable');
   // Одна нестабильная гипотеза не останавливает; [unk], державшийся 3 обновления, — останавливает.
   const hyp = (n) => ALL.slice(0, i).concat('[unk]', ...ALL.slice(i + 1, i + 1 + n)).join(' ');
@@ -102,4 +102,41 @@ test('слово вне словаря звучит как [unk] — это не
   const ev = tr.final(said(['the', 'rabbit', 'hole', 'went', 'on', 'fancy', '[unk]', 'as', 'you', 'fall']));
   assert.ok(!ev.some((e) => e.type === 'error'));
   assert.ok(tr.done);
+});
+
+test('акцент: «свободный» услышал похожее слово — засчитано; явная подмена — ошибка', async () => {
+  const { similarWord, STRICTNESS } = await import('../shared/read-align.js');
+  assert.ok(similarWord('tide', 'tired'));
+  assert.ok(similarWord('sister', 'sista'));
+  assert.ok(similarWord('conversation', 'conversations'));
+  assert.ok(!similarWord('sing', 'say'));
+  assert.ok(!similarWord('remember', 'remarkable'));
+  // «по тексту» неуверен (0.6), «свободный» услышал «tide» вместо «tired» — при обычной строгости не ошибка.
+  const tr = new ReadTracker(paragraphWords([{ id: 1, text: 'She was very tired of sitting.' }]), STRICTNESS.normal);
+  const r2 = said(['she', 'was', 'very', 'tired', 'of', 'sitting'], { 3: 0.6 });
+  tr.addFree(r2.map((w, k) => (k === 3 ? { ...w, word: 'tide' } : w)));
+  assert.ok(!tr.final(r2).some((e) => e.type === 'error'));
+  // [unk] «по тексту», но «свободный» услышал похожее — тоже не ошибка.
+  const tr2 = new ReadTracker(paragraphWords([{ id: 1, text: 'She was very tired of sitting.' }]), STRICTNESS.normal);
+  const r2b = said(['she', 'was', 'very', '[unk]', 'of', 'sitting']);
+  tr2.addFree(r2b.map((w, k) => (k === 3 ? { ...w, word: 'tied' } : w)));
+  assert.ok(!tr2.final(r2b).some((e) => e.type === 'error'));
+  // При обычной строгости досрочной остановки по промежуточной гипотезе нет.
+  const tr3 = new ReadTracker(paragraphWords([{ id: 1, text: S }]), STRICTNESS.normal);
+  const iR = ALL.indexOf('remarkable');
+  for (let n = 3; n < 8; n++) assert.ok(!tr3.partial(ALL.slice(0, iR).concat('[unk]', ...ALL.slice(iR + 1, iR + 1 + n)).join(' ')).unk);
+});
+
+test('слово проглочено распознавателем «по тексту», но «свободный» его слышал — не пропуск', () => {
+  const tr = new ReadTracker(paragraphWords([{ id: 1, text: 'She felt stupid, whether the pleasure was worth it.' }]));
+  // «по тексту» пропустил whether: stupid@0.3, the@0.9; «свободный» слышал whether@0.6.
+  const r2 = [{ word: 'she', conf: 1, start: 0, end: 0.1 }, { word: 'felt', conf: 1, start: 0.1, end: 0.2 }, { word: 'stupid', conf: 1, start: 0.2, end: 0.45 },
+    { word: 'the', conf: 1, start: 0.9, end: 1.0 }, { word: 'pleasure', conf: 1, start: 1.0, end: 1.3 }, { word: 'was', conf: 1, start: 1.3, end: 1.4 },
+    { word: 'worth', conf: 1, start: 1.4, end: 1.6 }, { word: 'it', conf: 1, start: 1.6, end: 1.7 }];
+  tr.addFree([{ word: 'whether', conf: 1, start: 0.55, end: 0.85 }]);
+  assert.ok(!tr.final(r2).some((e) => e.type === 'error'));
+  assert.ok(tr.done);
+  // А если «свободный» тоже ничего не слышал — пропуск значимого слова остаётся ошибкой.
+  const tr2 = new ReadTracker(paragraphWords([{ id: 1, text: 'She felt stupid, whether the pleasure was worth it.' }]));
+  assert.equal(tr2.words[tr2.final(r2).at(-1).i].w, 'whether');
 });
