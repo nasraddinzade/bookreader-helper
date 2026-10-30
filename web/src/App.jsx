@@ -5,6 +5,7 @@ import Library from './components/Library.jsx';
 import Reader from './components/Reader.jsx';
 import Vocab from './components/Vocab.jsx';
 import Review from './components/Review.jsx';
+import GameBadge from './components/GameBadge.jsx';
 import Settings from './components/Settings.jsx';
 
 const NAV = [
@@ -43,6 +44,7 @@ export default function App() {
             </a>
           ))}
         </nav>
+        <GameBadge />
       </header>
       <main className={`screen screen-${page}`}>{screen}</main>
     </div>

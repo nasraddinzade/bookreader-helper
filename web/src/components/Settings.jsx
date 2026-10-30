@@ -231,6 +231,17 @@ export default function Settings() {
           </label>
           <label className="check"><input type="checkbox" checked={!!s.immersive} onChange={set('immersive')} /> Режим погружения (клавиша F)</label>
         </div>
+        <label>Испытание чтеца (клавиша R): строгость проверки произношения
+          <select value={s.readStrictness || 'normal'} onChange={set('readStrictness')}>
+            <option value="soft">мягко — останавливает только на явных ошибках</option>
+            <option value="normal">обычно</option>
+            <option value="strict">строго — неуверенно прочитанное слово тоже ошибка</option>
+          </select>
+        </label>
+        <p className="muted small">
+          Речь распознаётся на этом компьютере (Vosk, в браузере): звук никуда не отправляется. Распознавание ловит
+          слова, которые прочитаны не так, как написано, но не оценивает тонкости произношения (th, ударение).
+        </p>
         <label>Подсказки над словами (клавиша H)
           <select value={s.hintMode || 'visible'} onChange={set('hintMode')}>
             {HINT_MODES.map((m) => <option key={m} value={m}>{HINT_MODE_LABELS[m]}</option>)}

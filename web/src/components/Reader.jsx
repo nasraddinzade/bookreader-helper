@@ -10,6 +10,7 @@ import {
 } from '../lib/tts.js';
 import WordCard from './WordCard.jsx';
 import SelectionPopover from './SelectionPopover.jsx';
+import ReadAloud from './ReadAloud.jsx';
 import QueueStatus from './QueueStatus.jsx';
 
 function Token({ t, id, hintMode, tapped, saved, inPhrase, onTap, onOpen }) {
@@ -39,7 +40,7 @@ function Token({ t, id, hintMode, tapped, saved, inPhrase, onTap, onOpen }) {
   );
 }
 
-const Row = memo(function Row({ s, isNewPara, hintMode, ruMode, ruOpen, tappedTok, keys, speaking, onTap, onToggleRu, onOpenToken, onPlay, onRetry }) {
+const Row = memo(function Row({ s, isNewPara, hintMode, ruMode, ruOpen, tappedTok, keys, speaking, onTap, onToggleRu, onOpenToken, onPlay, onRetry, paraStart, onReadAloud }) {
   const sid = `s${s.idx}`;
   const done = s.status === 'done' && s.gloss;
   const showRuInline = ruMode === 'click' && ruOpen;
@@ -57,7 +58,10 @@ const Row = memo(function Row({ s, isNewPara, hintMode, ruMode, ruOpen, tappedTo
       >
         {s.idx + 1}
       </button>
-      <button className={`play${speaking ? ' active' : ''}`} title="Прослушать предложение" onClick={() => onPlay(s)}>▶</button>
+      <span className="ctl">
+        <button className={`play${speaking ? ' active' : ''}`} title="Прослушать предложение" onClick={() => onPlay(s)}>▶</button>
+        {paraStart && s.kind !== 'h' && <button className="mic" title="Испытание чтеца: прочитать этот абзац вслух" onClick={() => onReadAloud(s.para)}>🎙</button>}
+      </span>
       <div className="en">
         {done ? (
           s.gloss.tokens.map((t, k) => (
@@ -118,6 +122,7 @@ export default function Reader({ param }) {
   const [tocOpen, setTocOpen] = useState(false);
   const [bookmarks, setBookmarks] = useState([]);
   const [card, setCard] = useState(null); // { sentence, token }
+  const [readAloud, setReadAloud] = useState(null); // номер абзаца в испытании чтеца
   const keys = useSavedKeys(book?.lang || 'en');
   const speakingId = useSpeakingId();
   const chapterRef = useRef(null);
@@ -238,6 +243,7 @@ export default function Reader({ param }) {
     const onKey = (e) => {
       if (e.target && /^(INPUT|TEXTAREA|SELECT)$/.test(e.target.tagName)) return;
       if (e.ctrlKey || e.metaKey) return;
+      if (readAloud !== null) return; // клавиши читалки не работают поверх испытания чтеца
       const k = e.key.toLowerCase();
       if (k === 'h' || k === 'р') { e.preventDefault(); cycleHintMode(); }
       else if (k === 't' || k === 'е') { e.preventDefault(); toggleRuColumn(); }
@@ -248,6 +254,7 @@ export default function Reader({ param }) {
       }
       else if (k === 'a' || k === 'ф') { e.preventDefault(); toggleAudiobook(); }
       else if (k === 'f' || k === 'а') { e.preventDefault(); toggleImmersive(); }
+      else if (k === 'r' || k === 'к') { e.preventDefault(); readAloudHere(); }
       else if (e.key === '+' || e.key === '=') { e.preventDefault(); changeScale(0.05); }
       else if (e.key === '-' || e.key === '_') { e.preventDefault(); changeScale(-0.05); }
       else if (ab.active && e.key === 'ArrowDown' && e.shiftKey) { e.preventDefault(); seekAudiobook(1); }
@@ -329,6 +336,21 @@ export default function Reader({ param }) {
   const onRetry = useCallback((s) => api.post(`/api/sentences/${s.id}/retry`).then(() => loadChapter(s ? chapterRef.current.idx : 0)), [loadChapter]);
   const getSentence = useCallback((idx) => chapterRef.current?.sentences?.[idx] || null, []);
 
+  // Испытание чтеца: абзацы главы, в которых есть не только заголовки.
+  const paragraphs = () => [...new Set((chapterRef.current?.sentences || []).filter((x) => x.kind !== 'h').map((x) => x.para))];
+  const openReadAloud = useCallback((para) => {
+    stopAudiobook();
+    setCard(null);
+    setReadAloud(para);
+  }, []);
+  const readAloudHere = () => {
+    const c = chapterRef.current;
+    if (!c) return;
+    const top = c.sentences[topSentence.current] || c.sentences[0];
+    const list = paragraphs();
+    openReadAloud(list.find((p) => p >= (top?.para ?? 0)) ?? list[0]);
+  };
+
   const toggleRu = useCallback((idx) => {
     setRuOpen((prev) => { const n = new Set(prev); if (n.has(idx)) n.delete(idx); else n.add(idx); return n; });
   }, []);
@@ -373,6 +395,7 @@ export default function Reader({ param }) {
           <button className="small" onClick={() => changeScale(-0.05)} title="Мельче (клавиша −)">A−</button>
           <button className="small" onClick={() => changeScale(0.05)} title="Крупнее (клавиша +)">A+</button>
           <button className={`small${immersive ? ' active' : ''}`} onClick={toggleImmersive} title="Режим погружения: только текст (клавиша F)">❦ Погружение</button>
+          <button className="small" onClick={readAloudHere} title="Испытание чтеца: читать абзац вслух (клавиша R)">🎙 Читать вслух</button>
           <span className={`audiobook${ab.active ? ' on' : ''}`}>
             <button className={`small${ab.playing ? ' active' : ''}`} onClick={toggleAudiobook} title="Аудиокнига: читать главу вслух (клавиша A)">
               {ab.playing ? '⏸' : '🎧'}{ab.active ? '' : ' Аудиокнига'}
@@ -441,6 +464,7 @@ export default function Reader({ param }) {
               key={s.id}
               s={s}
               isNewPara={i > 0 && s.para !== rows[i - 1].para}
+              paraStart={i === 0 || s.para !== rows[i - 1].para}
               hintMode={hintMode}
               ruMode={ruMode}
               ruOpen={ruOpen.has(s.idx)}
@@ -452,12 +476,33 @@ export default function Reader({ param }) {
               onOpenToken={onOpenToken}
               onPlay={onPlay}
               onRetry={onRetry}
+              onReadAloud={openReadAloud}
             />
           ))}
           {card && (
             <WordCard token={card.token} sentence={card.sentence} book={book} chapter={chapter} onClose={() => setCard(null)} />
           )}
           <SelectionPopover book={book} chapter={chapter} getSentence={getSentence} />
+          {readAloud !== null && (() => {
+            const list = paragraphs();
+            const at = list.indexOf(readAloud);
+            return (
+              <ReadAloud
+                key={readAloud}
+                book={book}
+                chapter={chapter}
+                para={readAloud}
+                hasNext={at >= 0 && at < list.length - 1}
+                onNext={() => {
+                  const next = list[at + 1];
+                  setReadAloud(next);
+                  const first = chapter.sentences.find((x) => x.para === next);
+                  if (first) document.querySelector(`.rows [data-index="${first.idx}"]`)?.scrollIntoView({ block: 'center' });
+                }}
+                onClose={() => setReadAloud(null)}
+              />
+            );
+          })()}
           <div className="chapter-end">
             <div className="ornament">✦ ❦ ✦</div>
             {chapterIdx < book.chapters.length - 1 ? (

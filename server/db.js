@@ -133,6 +133,27 @@ const MIGRATIONS = [
   CREATE INDEX lemma_dict_pending ON lemma_dict (base) WHERE base IS NULL;
   DELETE FROM settings WHERE key IN ('batchSize', 'parallel');
   `,
+  // 3: игра — события с очками (чтение вслух, викторина, повторение) и слова, которые игрок знает.
+  `
+  CREATE TABLE game_events (
+    id INTEGER PRIMARY KEY,
+    at TEXT NOT NULL,
+    day TEXT NOT NULL,
+    kind TEXT NOT NULL,
+    points INTEGER NOT NULL,
+    book_id INTEGER,
+    chapter_idx INTEGER,
+    para INTEGER,
+    data TEXT NOT NULL DEFAULT '{}'
+  );
+  CREATE INDEX game_events_day ON game_events (day);
+  CREATE TABLE game_known (
+    lang TEXT NOT NULL,
+    lemma TEXT NOT NULL,
+    at TEXT NOT NULL,
+    PRIMARY KEY (lang, lemma)
+  );
+  `,
 ];
 
 {
@@ -170,6 +191,7 @@ export const DEFAULT_SETTINGS = {
   fontScale: 1, // размер текста книги
   hintMode: 'visible', // visible | hover | off
   ruColumn: 'show', // show | hide | click
+  readStrictness: 'normal', // чтение вслух: soft | normal | strict
 };
 
 const getSettingStmt = db.prepare('SELECT key, value FROM settings');

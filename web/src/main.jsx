@@ -9,6 +9,9 @@ import '@fontsource/literata/400.css'; // переводы, подсказки �
 import '@fontsource/literata/400-italic.css';
 import '@fontsource/literata/600.css';
 import App from './App.jsx';
+
+// Для диагностики распознавания из консоли браузера (модуль тяжёлый — грузится по требованию).
+window.__speech = () => import('./lib/speech.js');
 import './index.css';
 import './theme.css';
 

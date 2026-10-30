@@ -1,11 +1,12 @@
 // Локальный сервер: API, SSE и собранный фронтенд. Слушает только 127.0.0.1.
 
 import fs from 'node:fs';
+import path from 'node:path';
 import { spawn } from 'node:child_process';
 import Fastify from 'fastify';
 import fastifyStatic from '@fastify/static';
 import multipart from '@fastify/multipart';
-import { HOST, PORT, DIST_DIR, DATA_DIR } from './config.js';
+import { HOST, PORT, DIST_DIR, DATA_DIR, MODELS_DIR } from './config.js';
 import { db, getSettings, updateSettings } from './db.js';
 import { importBook } from './importers/index.js';
 import {
@@ -20,6 +21,8 @@ import { killAllClaude } from './providers/claude-code.js';
 import { saveItem, findItem, keyFor, listItems, deleteItem, deleteExample, savedKeys, answer, exportJson, getItem } from './vocab.js';
 import { translateSelection, storeSelection } from './selection.js';
 import { wordMeanings } from './queue/dictionary.js';
+import { speechWords, commonWords } from './speech.js';
+import { recordEvent, summary as gameSummary, quiz, quizAnswer } from './game.js';
 import { sentenceAudio, textAudio, ttsStatus, kickTts, resetAudio, stopTts, synth } from './tts/index.js';
 
 const app = Fastify({ logger: { level: 'warn' }, bodyLimit: 10 * 1024 * 1024 });
@@ -157,7 +160,26 @@ app.delete('/api/vocab/:id/examples/:eid', async (req) => {
 app.post('/api/vocab/:id/answer', async (req) => {
   const item = answer(num(req.params.id), !!req.body?.knew);
   emit('vocab', {});
+  // Верный ответ в повторении тоже приносит немного опыта и засчитывает день в серию.
+  if (req.body?.knew) { recordEvent({ kind: 'review', points: 3, data: { id: num(req.params.id) } }); emit('game', {}); }
   return item;
+});
+
+// ---- Игра: чтение вслух, викторина, уровни -----------------------------------
+
+app.get('/api/game', async () => gameSummary());
+app.post('/api/game/read', async (req) => {
+  const { bookId, chapter, para, stats } = req.body || {};
+  const s = recordEvent({ kind: 'read', points: Math.min(3000, Number(stats?.points) || 0), bookId, chapter, para, data: stats || {} });
+  emit('game', {});
+  return s;
+});
+app.post('/api/game/quiz', async (req) => quiz(req.body || {}));
+app.post('/api/game/quiz/answer', async (req) => {
+  const r = quizAnswer(req.body || {});
+  emit('game', {});
+  if (r.saved) emit('vocab', {});
+  return r;
 });
 
 // Значения отдельных слов многословного блока (для карточки слова).
@@ -251,6 +273,20 @@ app.post('/api/ollama/benchmark', async (req, reply) => {
     return reply.code(503).send({ error: e.message });
   }
 });
+
+// ---- Модель распознавания речи (Vosk, работает в браузере) -----------------
+
+app.get('/api/models/vosk/:file', async (req, reply) => {
+  const name = String(req.params.file);
+  if (!/^[\w.-]+\.tar\.gz$/.test(name)) return notFound(reply);
+  const file = path.join(MODELS_DIR, 'vosk', name);
+  if (!fs.existsSync(file)) return notFound(reply, 'Модель распознавания не скачана');
+  reply.header('Cache-Control', 'max-age=604800');
+  return reply.type('application/gzip').send(fs.createReadStream(file));
+});
+
+app.get('/api/speech/common', async (req) => commonWords(Math.min(10000, Number(req.query.n) || 3000)));
+app.post('/api/speech/words', async (req) => speechWords((req.body?.words || []).slice(0, 2000)));
 
 // ---- События (SSE) -----------------------------------------------------------
 
