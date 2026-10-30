@@ -470,3 +470,46 @@ body.immersive .chapter-head { padding-top: 3rem; }
   margin: 0 -2rem -1.8rem; padding: 1rem 2rem 1.6rem; box-shadow: 0 -10px 20px -10px rgba(0, 0, 0, 0.25);
 }
 @media (max-width: 720px) { .ra-mistake, .ra-result, .ra-quiz { margin: 0 -1rem -1.4rem; padding: 1rem 1rem 1.4rem; bottom: -1.4rem; } }
+
+/* ==========================================================================
+   Испытание чтеца прямо в книге
+   ========================================================================== */
+/* Активный абзац: золотая черта слева, непрочитанные слова — бледными чернилами. */
+.row.ra-active { box-shadow: inset 3px 0 0 var(--gold); background: linear-gradient(90deg, var(--accent-bg), transparent 40%); }
+.tok[class*="g-"] .w { transition: opacity 0.35s, color 0.35s, text-shadow 0.35s; }
+.tok.g-pending .w { opacity: 0.3; }
+.tok.g-next .w { opacity: 0.6; box-shadow: inset 0 -2px 0 var(--gold); }
+.tok.g-reading .w { opacity: 0.7; }
+.tok.g-ok .w { opacity: 1; animation: ra-ink 0.6s ease-out; }
+.tok.g-auto .w { opacity: 0.85; }
+.tok.g-fixed .w { color: var(--ok); }
+.tok.g-skipped .w { opacity: 0.5; text-decoration: line-through; text-decoration-color: var(--danger); }
+.tok.g-error .w { color: var(--danger); animation: ra-shake 0.4s; display: inline-block; }
+.tok.g-error { background: rgba(160, 30, 20, 0.12); }
+.tok .ra-pop { font-size: 0.6em; top: -0.6em; }
+/* Прочитанный вслух абзац: золотая печать вместо 🎙 у первого предложения. */
+.row.ra-read .mic { opacity: 0.85; color: var(--gold); font-size: 0.9rem; }
+
+/* Панель внизу экрана: не закрывает текст и не мешает листать главу. */
+.ra-hud {
+  position: sticky; bottom: 0.6rem; z-index: 15; margin: 1rem auto 0; width: min(900px, 100%);
+  background: var(--paper); border: 1px solid var(--gold-soft); border-radius: 8px;
+  box-shadow: var(--shadow), inset 0 0 0 4px var(--paper), inset 0 0 0 5px var(--gold-soft);
+  padding: 0.6rem 1rem 0.8rem; animation: ra-unroll 0.3s ease-out; max-height: 55vh; overflow: auto;
+}
+.ra-hud-bar { display: flex; align-items: center; gap: 0.8rem; flex-wrap: wrap; font-family: var(--font-display); }
+.ra-hud .ra-title { font-size: 1.15rem; flex: 0 0 auto; }
+.ra-hud .ra-mistake, .ra-hud .ra-quiz {
+  position: static; margin: 0.5rem 0 0; padding: 0.6rem 0 0; box-shadow: none; background: none; border-top: 1px solid var(--line);
+}
+.ra-hud .ra-m-word, .ra-hud .ra-q-word { font-size: 1.7rem; }
+.ra-hud .ra-q-sentence { font-size: 1rem; margin-bottom: 0.6rem; }
+.ra-hud .ra-q-options button { padding: 0.45rem; }
+.ra-notice { color: var(--accent); font-style: italic; margin-top: 0.3rem; }
+.ra-result-line { display: flex; align-items: center; gap: 0.9rem; flex-wrap: wrap; margin-top: 0.4rem; justify-content: center; }
+.ra-result-line .ra-stars span { font-size: 1.7rem; }
+.ra-level { display: inline-flex; align-items: center; gap: 0.4rem; font-family: var(--font-display); width: auto; }
+.ra-level .ra-level-track { width: 110px; margin: 0; }
+.ra-q-after { flex-direction: row; flex-wrap: wrap; justify-content: center; gap: 0.6rem; margin-top: 0.3rem; }
+body.immersive .ra-hud { bottom: 3.4rem; }
+@media (max-width: 720px) { .ra-hud { padding: 0.5rem 0.6rem 0.7rem; } .ra-hud .ra-title { display: none; } }

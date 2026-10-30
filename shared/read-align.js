@@ -27,7 +27,7 @@ export function paragraphWords(sentences) {
       for (const part of String(t.en).split(/[\s—–-]+/)) {
         const w = normWord(part);
         if (!w || !/[a-z]/.test(w)) continue;
-        out.push({ w, s: si, t: ti, check: true });
+        out.push({ w, s: si, sid: s.id, t: ti, check: true });
       }
     });
   });

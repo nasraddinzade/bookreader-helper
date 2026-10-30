@@ -139,3 +139,9 @@ export function quizAnswer({ bookId, chapter, para, item, result }) {
   }
   return { summary: recordEvent({ kind: 'quiz', points, bookId, chapter, para, data: { lemma: item.lemma, result } }), points, saved: !!saved };
 }
+
+/** Абзацы главы, уже прочитанные вслух (для отметок и порядка прохождения). */
+export function readParagraphs(bookId, chapter) {
+  return db.prepare(`SELECT DISTINCT para FROM game_events WHERE kind = 'read' AND book_id = ? AND chapter_idx = ? AND para IS NOT NULL ORDER BY para`)
+    .all(bookId, chapter).map((r) => r.para);
+}

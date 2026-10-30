@@ -10,12 +10,13 @@ import {
 } from '../lib/tts.js';
 import WordCard from './WordCard.jsx';
 import SelectionPopover from './SelectionPopover.jsx';
-import ReadAloud from './ReadAloud.jsx';
+import ReadHud from './ReadHud.jsx';
+import { readGame, useReadGame, tokensOf } from '../lib/readGame.js';
 import QueueStatus from './QueueStatus.jsx';
 
-function Token({ t, id, hintMode, tapped, saved, inPhrase, onTap, onOpen }) {
+function Token({ t, id, hintMode, tapped, saved, inPhrase, onTap, onOpen, gameCls, pops }) {
   const ptype = useRef('mouse');
-  const cls = ['tok', tapped && 'tapped', saved && 'saved', inPhrase && 'saved-phrase'].filter(Boolean).join(' ');
+  const cls = ['tok', tapped && 'tapped', saved && 'saved', inPhrase && 'saved-phrase', gameCls && `g-${gameCls}`].filter(Boolean).join(' ');
   return (
     <span
       className={cls}
@@ -36,19 +37,24 @@ function Token({ t, id, hintMode, tapped, saved, inPhrase, onTap, onOpen }) {
       <span className="g">{cleanCtx(t.ctx) || ' '}</span>
       <span className="w">{t.en}</span>
       {hintMode === 'hover' && t.ctx ? <span className="tip">{cleanCtx(t.ctx)}</span> : null}
+      {pops?.map((p) => <span key={p.id} className="ra-pop">{p.text}</span>)}
     </span>
   );
 }
 
-const Row = memo(function Row({ s, isNewPara, hintMode, ruMode, ruOpen, tappedTok, keys, speaking, onTap, onToggleRu, onOpenToken, onPlay, onRetry, paraStart, onReadAloud }) {
+// gameOn — строка в абзаце, который сейчас читается вслух; gameV меняется с каждым шагом игры,
+// чтобы перерисовывались только строки активного абзаца. readDone — абзац уже прочитан вслух.
+const Row = memo(function Row({ s, isNewPara, hintMode, ruMode, ruOpen, tappedTok, keys, speaking, onTap, onToggleRu, onOpenToken, onPlay, onRetry, paraStart, onReadAloud, gameOn, gameV, readDone }) { // eslint-disable-line no-unused-vars
   const sid = `s${s.idx}`;
   const done = s.status === 'done' && s.gloss;
   const showRuInline = ruMode === 'click' && ruOpen;
   const phraseToks = useMemo(() => (done ? phraseTokenSet(s.gloss.tokens, keys) : null), [done, s.gloss, keys]);
+  // Непереведённое предложение в игре всё равно разбивается на слова, чтобы они проявлялись.
+  const toks = done ? s.gloss.tokens : gameOn ? tokensOf(s) : null;
   return (
     <div
       data-index={s.idx}
-      className={['row', isNewPara && 'para', s.kind === 'h' && 'heading', s.status, speaking && 'speaking'].filter(Boolean).join(' ')}
+      className={['row', isNewPara && 'para', s.kind === 'h' && 'heading', s.status, speaking && 'speaking', gameOn && 'ra-active', paraStart && readDone && 'ra-read'].filter(Boolean).join(' ')}
     >
       <button
         className={`num${ruMode === 'click' ? ' clickable' : ''}${ruOpen ? ' open' : ''}`}
@@ -60,11 +66,15 @@ const Row = memo(function Row({ s, isNewPara, hintMode, ruMode, ruOpen, tappedTo
       </button>
       <span className="ctl">
         <button className={`play${speaking ? ' active' : ''}`} title="Прослушать предложение" onClick={() => onPlay(s)}>▶</button>
-        {paraStart && s.kind !== 'h' && <button className="mic" title="Испытание чтеца: прочитать этот абзац вслух" onClick={() => onReadAloud(s.para)}>🎙</button>}
+        {paraStart && s.kind !== 'h' && (
+          <button className="mic" title={readDone ? 'Абзац прочитан вслух — прочитать ещё раз' : 'Испытание чтеца: прочитать этот абзац вслух'} onClick={() => onReadAloud(s.para)}>
+            {readDone ? '✦' : '🎙'}
+          </button>
+        )}
       </span>
       <div className="en">
-        {done ? (
-          s.gloss.tokens.map((t, k) => (
+        {toks ? (
+          toks.map((t, k) => (
             <span key={k}>
               {k > 0 ? (t.gap || ' ') : ''}
               <Token
@@ -76,6 +86,8 @@ const Row = memo(function Row({ s, isNewPara, hintMode, ruMode, ruOpen, tappedTo
                 inPhrase={phraseToks?.has(k)}
                 onTap={onTap}
                 onOpen={() => onOpenToken?.(s, t, k)}
+                gameCls={gameOn ? readGame.tokenClass(s.id, k) : null}
+                pops={gameOn ? readGame.popsFor(s.id, k) : null}
               />
             </span>
           ))
@@ -122,7 +134,8 @@ export default function Reader({ param }) {
   const [tocOpen, setTocOpen] = useState(false);
   const [bookmarks, setBookmarks] = useState([]);
   const [card, setCard] = useState(null); // { sentence, token }
-  const [readAloud, setReadAloud] = useState(null); // номер абзаца в испытании чтеца
+  const game = useReadGame(); // «Испытание чтеца» прямо в тексте главы
+  const gameActive = game.active;
   const keys = useSavedKeys(book?.lang || 'en');
   const speakingId = useSpeakingId();
   const chapterRef = useRef(null);
@@ -243,7 +256,7 @@ export default function Reader({ param }) {
     const onKey = (e) => {
       if (e.target && /^(INPUT|TEXTAREA|SELECT)$/.test(e.target.tagName)) return;
       if (e.ctrlKey || e.metaKey) return;
-      if (readAloud !== null) return; // клавиши читалки не работают поверх испытания чтеца
+      if (gameActive && e.key === 'Escape' && !card) { e.preventDefault(); readGame.stop(); return; }
       const k = e.key.toLowerCase();
       if (k === 'h' || k === 'р') { e.preventDefault(); cycleHintMode(); }
       else if (k === 't' || k === 'е') { e.preventDefault(); toggleRuColumn(); }
@@ -336,20 +349,38 @@ export default function Reader({ param }) {
   const onRetry = useCallback((s) => api.post(`/api/sentences/${s.id}/retry`).then(() => loadChapter(s ? chapterRef.current.idx : 0)), [loadChapter]);
   const getSentence = useCallback((idx) => chapterRef.current?.sentences?.[idx] || null, []);
 
-  // Испытание чтеца: абзацы главы, в которых есть не только заголовки.
-  const paragraphs = () => [...new Set((chapterRef.current?.sentences || []).filter((x) => x.kind !== 'h').map((x) => x.para))];
+  // Испытание чтеца прямо в тексте: абзацы по порядку, игра сама переведёт к первому непрочитанному.
   const openReadAloud = useCallback((para) => {
     stopAudiobook();
     setCard(null);
-    setReadAloud(para);
+    readGame.start(para);
   }, []);
   const readAloudHere = () => {
+    if (readGame.active) { readGame.stop(); return; }
     const c = chapterRef.current;
     if (!c) return;
     const top = c.sentences[topSentence.current] || c.sentences[0];
-    const list = paragraphs();
+    const list = readGame.paragraphs();
     openReadAloud(list.find((p) => p >= (top?.para ?? 0)) ?? list[0]);
   };
+
+  // Игра знает главу и прочитанные абзацы; уход из читалки останавливает её.
+  useEffect(() => {
+    if (!book || !chapter) return;
+    if (readGame.chapter?.idx === chapter.idx && readGame.book?.id === book.id) readGame.updateChapter(chapter);
+    else readGame.attach(book, chapter, settings.readStrictness);
+  }, [book, chapter]); // eslint-disable-line react-hooks/exhaustive-deps
+  useEffect(() => () => readGame.stop(), []);
+
+  // Активное слово игры остаётся на экране: текст прокручивается за читающим.
+  useEffect(() => {
+    if (!gameActive) return;
+    const el = document.querySelector('.rows .tok.g-next, .rows .tok.g-error') || [...document.querySelectorAll('.rows .tok.g-ok, .rows .tok.g-reading')].pop();
+    if (!el) return;
+    const r = el.getBoundingClientRect();
+    const hud = document.querySelector('.ra-hud')?.getBoundingClientRect().height || 0;
+    if (r.top < 120 || r.bottom > window.innerHeight - hud - 30) el.scrollIntoView({ block: 'center', behavior: 'smooth' });
+  }, [gameActive, game.s.tentative, game.s.phase, game.s.para]);
 
   const toggleRu = useCallback((idx) => {
     setRuOpen((prev) => { const n = new Set(prev); if (n.has(idx)) n.delete(idx); else n.add(idx); return n; });
@@ -477,32 +508,16 @@ export default function Reader({ param }) {
               onPlay={onPlay}
               onRetry={onRetry}
               onReadAloud={openReadAloud}
+              gameOn={gameActive && s.para === game.s.para}
+              gameV={gameActive && s.para === game.s.para ? game.version : 0}
+              readDone={game.readParas.has(s.para)}
             />
           ))}
           {card && (
             <WordCard token={card.token} sentence={card.sentence} book={book} chapter={chapter} onClose={() => setCard(null)} />
           )}
           <SelectionPopover book={book} chapter={chapter} getSentence={getSentence} />
-          {readAloud !== null && (() => {
-            const list = paragraphs();
-            const at = list.indexOf(readAloud);
-            return (
-              <ReadAloud
-                key={readAloud}
-                book={book}
-                chapter={chapter}
-                para={readAloud}
-                hasNext={at >= 0 && at < list.length - 1}
-                onNext={() => {
-                  const next = list[at + 1];
-                  setReadAloud(next);
-                  const first = chapter.sentences.find((x) => x.para === next);
-                  if (first) document.querySelector(`.rows [data-index="${first.idx}"]`)?.scrollIntoView({ block: 'center' });
-                }}
-                onClose={() => setReadAloud(null)}
-              />
-            );
-          })()}
+          <ReadHud onNextChapter={chapterIdx < book.chapters.length - 1 ? () => goChapter(1) : null} />
           <div className="chapter-end">
             <div className="ornament">✦ ❦ ✦</div>
             {chapterIdx < book.chapters.length - 1 ? (
