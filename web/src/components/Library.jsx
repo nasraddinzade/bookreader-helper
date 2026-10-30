@@ -22,15 +22,17 @@ export default function Library() {
   const reloadTimer = useRef(null);
 
   const [queue, setQueue] = useState(null);
+  const [gameStats, setGameStats] = useState({}); // итоги «Испытания чтеца» по книгам
   const reload = () => {
     api.get('/api/queue').then(setQueue).catch(() => {});
+    api.get('/api/game/books').then(setGameStats).catch(() => {});
     return api.get('/api/books').then(setBooks).catch((e) => setError(e.message));
   };
   useEffect(() => { reload(); }, []);
 
   // Прогресс перевода и озвучки приходит событиями; список перечитываем не чаще раза в 2 с.
   useServerEvents((ev) => {
-    if (!['library', 'sentence', 'audio', 'queue'].includes(ev.type)) return;
+    if (!['library', 'sentence', 'audio', 'queue', 'game'].includes(ev.type)) return;
     if (reloadTimer.current) return;
     reloadTimer.current = setTimeout(() => { reloadTimer.current = null; reload(); }, ev.type === 'library' ? 0 : 2000);
   });
@@ -54,6 +56,13 @@ export default function Library() {
   const remove = async (b) => {
     if (!window.confirm(`Удалить книгу «${b.title}» вместе с переводом и аудио? Сохранённые слова и фразы останутся.`)) return;
     await api.del(`/api/books/${b.id}`);
+    reload();
+  };
+
+  const resetGame = async (b) => {
+    const st = gameStats[b.id] || { paragraphs: 0, points: 0 };
+    if (!window.confirm(`Сбросить прохождение «${b.title}»?\n\nУдалятся отметки прочитанных вслух абзацев (${st.paragraphs}) и очки за эту книгу (✦ ${st.points}). Слова и фразы в словаре останутся.`)) return;
+    await api.del(`/api/game/books/${b.id}`);
     reload();
   };
 
@@ -95,6 +104,12 @@ export default function Library() {
                 <Bar label="Перевод" value={b.translated} max={b.total} />
                 <Bar label="Озвучка" value={b.voiced} max={b.total} cls="audio" />
                 <Bar label="Прочитано" value={b.readPercent} max={100} cls="read" />
+                {gameStats[b.id]?.paragraphs > 0 && (
+                  <div className="book-game small">
+                    <span>🎙 Вслух: {gameStats[b.id].paragraphs} абз. · ✦ {gameStats[b.id].points}</span>
+                    <button className="link small danger" onClick={() => resetGame(b)}>сбросить</button>
+                  </div>
+                )}
                 {b.errors > 0 && (
                   <div className="error small">
                     Ошибок перевода: {b.errors}{' '}

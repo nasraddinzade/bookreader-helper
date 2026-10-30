@@ -43,7 +43,7 @@ function Token({ t, id, hintMode, tapped, saved, inPhrase, onTap, onOpen, gameCl
 }
 
 // gameOn — строка в абзаце, который сейчас читается вслух; gameV меняется с каждым шагом игры,
-// чтобы перерисовывались только строки активного абзаца. readDone — абзац уже прочитан вслух.
+// чтобы перерисовывались только строки активного абзаца. readDone — звёзды прочитанного вслух абзаца (0 — не прочитан).
 const Row = memo(function Row({ s, isNewPara, hintMode, ruMode, ruOpen, tappedTok, keys, speaking, onTap, onToggleRu, onOpenToken, onPlay, onRetry, paraStart, onReadAloud, gameOn, gameV, readDone }) { // eslint-disable-line no-unused-vars
   const sid = `s${s.idx}`;
   const done = s.status === 'done' && s.gloss;
@@ -54,7 +54,7 @@ const Row = memo(function Row({ s, isNewPara, hintMode, ruMode, ruOpen, tappedTo
   return (
     <div
       data-index={s.idx}
-      className={['row', isNewPara && 'para', s.kind === 'h' && 'heading', s.status, speaking && 'speaking', gameOn && 'ra-active', paraStart && readDone && 'ra-read'].filter(Boolean).join(' ')}
+      className={['row', isNewPara && 'para', s.kind === 'h' && 'heading', s.status, speaking && 'speaking', gameOn && 'ra-active', readDone && !gameOn && 'ra-read', paraStart && readDone && !gameOn && 'ra-read-first'].filter(Boolean).join(' ')}
     >
       <button
         className={`num${ruMode === 'click' ? ' clickable' : ''}${ruOpen ? ' open' : ''}`}
@@ -63,6 +63,9 @@ const Row = memo(function Row({ s, isNewPara, hintMode, ruMode, ruOpen, tappedTo
         tabIndex={ruMode === 'click' ? 0 : -1}
       >
         {s.idx + 1}
+        {paraStart && readDone > 0 && !gameOn && (
+          <span className="ra-seal" title={`Прочитано вслух: ${'★'.repeat(readDone)}${'☆'.repeat(3 - readDone)}`}>{'★'.repeat(readDone)}{'☆'.repeat(3 - readDone)}</span>
+        )}
       </button>
       <span className="ctl">
         <button className={`play${speaking ? ' active' : ''}`} title="Прослушать предложение" onClick={() => onPlay(s)}>▶</button>
@@ -246,6 +249,7 @@ export default function Reader({ param }) {
     };
     // Словарь лемм дополнился — у слов главы появились словарные значения.
     if (ev.type === 'dict') { refetch(3000); return; }
+    if (ev.type === 'game') { if (ev.reset === bookId) readGame.onReset(bookId); if (tocOpen) loadGameStats(); return; }
     if (ev.bookId !== bookId) return;
     if ((ev.type === 'sentence' || ev.type === 'audio') && ev.chapter === chapterIdx) refetch(800);
     if (ev.type === 'chapter-done' || ev.type === 'queue') loadBook();
@@ -391,6 +395,18 @@ export default function Reader({ param }) {
     await api.post(`/api/books/${bookId}/bookmarks`, { chapter: chapterIdx, sentence: topSentence.current });
     loadBookmarks();
   };
+  // Итоги «Испытания чтеца» по книге и сброс прохождения (в оглавлении).
+  const [gameStats, setGameStats] = useState(null);
+  const loadGameStats = () => api.get('/api/game/books').then((r) => setGameStats(r[bookId] || { paragraphs: 0, points: 0 })).catch(() => {});
+  useEffect(() => { if (tocOpen) loadGameStats(); }, [tocOpen]); // eslint-disable-line react-hooks/exhaustive-deps
+  const resetGame = async () => {
+    const st = gameStats || { paragraphs: 0, points: 0 };
+    if (!window.confirm(`Сбросить прохождение «${book.title}»?\n\nУдалятся отметки прочитанных вслух абзацев (${st.paragraphs}) и очки за эту книгу (✦ ${st.points}). Слова и фразы в словаре останутся.`)) return;
+    await api.del(`/api/game/books/${bookId}`);
+    readGame.onReset(bookId);
+    loadGameStats();
+  };
+
   const removeBookmark = async (id) => {
     await api.del(`/api/books/${bookId}/bookmarks/${id}`);
     loadBookmarks();
@@ -459,6 +475,15 @@ export default function Reader({ param }) {
                 </li>
               ))}
             </ol>
+            <h2>Испытание чтеца</h2>
+            <div className="toc-game">
+              {gameStats ? (
+                <>
+                  <span>Прочитано вслух: <b>{gameStats.paragraphs}</b> абз. · <b>✦ {gameStats.points}</b></span>
+                  <button className="small danger" onClick={resetGame} disabled={!gameStats.paragraphs && !gameStats.points}>Сбросить прохождение</button>
+                </>
+              ) : <span className="muted small">…</span>}
+            </div>
             <h2>Закладки</h2>
             {bookmarks.length === 0 ? <p className="muted small">Закладок нет. Кнопка 🔖 ставит закладку на текущем предложении.</p> : (
               <ul className="bm-list">
@@ -510,7 +535,7 @@ export default function Reader({ param }) {
               onReadAloud={openReadAloud}
               gameOn={gameActive && s.para === game.s.para}
               gameV={gameActive && s.para === game.s.para ? game.version : 0}
-              readDone={game.readParas.has(s.para)}
+              readDone={game.readParas.get(s.para) || 0}
             />
           ))}
           {card && (

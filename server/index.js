@@ -22,7 +22,7 @@ import { saveItem, findItem, keyFor, listItems, deleteItem, deleteExample, saved
 import { translateSelection, storeSelection } from './selection.js';
 import { wordMeanings } from './queue/dictionary.js';
 import { speechWords, commonWords } from './speech.js';
-import { recordEvent, summary as gameSummary, quiz, quizAnswer, readParagraphs } from './game.js';
+import { recordEvent, summary as gameSummary, quiz, quizAnswer, readParagraphs, bookResults, resetBook } from './game.js';
 import { sentenceAudio, textAudio, ttsStatus, kickTts, resetAudio, stopTts, synth } from './tts/index.js';
 
 const app = Fastify({ logger: { level: 'warn' }, bodyLimit: 10 * 1024 * 1024 });
@@ -169,6 +169,12 @@ app.post('/api/vocab/:id/answer', async (req) => {
 
 app.get('/api/game', async () => gameSummary());
 app.get('/api/game/paras', async (req) => readParagraphs(num(req.query.bookId), num(req.query.chapter)));
+app.get('/api/game/books', async () => bookResults());
+app.delete('/api/game/books/:id', async (req) => {
+  const r = resetBook(num(req.params.id));
+  emit('game', { reset: num(req.params.id) });
+  return r;
+});
 app.post('/api/game/read', async (req) => {
   const { bookId, chapter, para, stats } = req.body || {};
   const s = recordEvent({ kind: 'read', points: Math.min(3000, Number(stats?.points) || 0), bookId, chapter, para, data: stats || {} });

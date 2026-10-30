@@ -140,8 +140,26 @@ export function quizAnswer({ bookId, chapter, para, item, result }) {
   return { summary: recordEvent({ kind: 'quiz', points, bookId, chapter, para, data: { lemma: item.lemma, result } }), points, saved: !!saved };
 }
 
-/** Абзацы главы, уже прочитанные вслух (для отметок и порядка прохождения). */
+/** Абзацы главы, уже прочитанные вслух, с лучшим результатом: [{ para, stars }] — для отметок и порядка. */
 export function readParagraphs(bookId, chapter) {
-  return db.prepare(`SELECT DISTINCT para FROM game_events WHERE kind = 'read' AND book_id = ? AND chapter_idx = ? AND para IS NOT NULL ORDER BY para`)
-    .all(bookId, chapter).map((r) => r.para);
+  return db.prepare(`SELECT para, MAX(CAST(json_extract(data, '$.stars') AS INTEGER)) AS stars FROM game_events
+      WHERE kind = 'read' AND book_id = ? AND chapter_idx = ? AND para IS NOT NULL GROUP BY para ORDER BY para`)
+    .all(bookId, chapter).map((r) => ({ para: r.para, stars: r.stars || 1 }));
+}
+
+/** Итоги игры по книгам: { [bookId]: { paragraphs, points } }. */
+export function bookResults() {
+  const out = {};
+  for (const r of db.prepare(`SELECT book_id, SUM(points) AS points,
+      COUNT(DISTINCT CASE WHEN kind = 'read' THEN chapter_idx || ':' || para END) AS paragraphs
+    FROM game_events WHERE book_id IS NOT NULL GROUP BY book_id`).all()) {
+    out[r.book_id] = { paragraphs: r.paragraphs, points: r.points };
+  }
+  return out;
+}
+
+/** Сброс прохождения книги: отметки прочитанных абзацев и очки за неё. Словарь не трогается. */
+export function resetBook(bookId) {
+  const n = db.prepare('DELETE FROM game_events WHERE book_id = ?').run(bookId).changes;
+  return { deleted: n, summary: summary() };
 }

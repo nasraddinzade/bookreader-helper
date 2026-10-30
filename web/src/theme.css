@@ -513,3 +513,17 @@ body.immersive .chapter-head { padding-top: 3rem; }
 .ra-q-after { flex-direction: row; flex-wrap: wrap; justify-content: center; gap: 0.6rem; margin-top: 0.3rem; }
 body.immersive .ra-hud { bottom: 3.4rem; }
 @media (max-width: 720px) { .ra-hud { padding: 0.5rem 0.6rem 0.7rem; } .ra-hud .ra-title { display: none; } }
+
+/* Прочитанный вслух абзац: золотая черта и подложка по всему абзацу, печать со звёздами у первой строки. */
+.row.ra-read {
+  box-shadow: inset 3px 0 0 var(--gold);
+  background: linear-gradient(90deg, rgba(200, 160, 70, 0.2), rgba(200, 160, 70, 0.07) 45%, transparent 80%);
+}
+.row.ra-read .en .w { color: var(--fg); }
+.row.ra-read-first .num { color: var(--gold); opacity: 1; }
+.ra-seal { display: block; font-size: 0.78rem; letter-spacing: -0.05em; color: var(--gold); line-height: 1; margin-top: 0.2rem; white-space: nowrap; text-shadow: 0 0 6px var(--gold-soft); }
+.row.ra-read .mic { opacity: 1; color: var(--gold); text-shadow: 0 0 6px var(--gold-soft); }
+.row.ra-read:hover { background: linear-gradient(90deg, rgba(200, 160, 70, 0.2), rgba(200, 160, 70, 0.06) 45%, transparent 75%); }
+.book-game { display: flex; gap: 0.5rem; align-items: baseline; color: var(--gold); font-family: var(--font-display); }
+.toc-game { display: flex; flex-direction: column; gap: 0.4rem; align-items: flex-start; padding-bottom: 0.4rem; }
+.toc-game button { align-self: flex-start; }

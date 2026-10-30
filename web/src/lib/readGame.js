@@ -32,7 +32,7 @@ export class ReadGame {
   reset() {
     this.book = null;
     this.chapter = null;
-    this.readParas = new Set(); // абзацы главы, уже прочитанные вслух
+    this.readParas = new Map(); // абзацы главы, уже прочитанные вслух: para → лучшие звёзды
     this.s = { phase: 'idle', para: null, error: '', notice: '', level: 0, tentative: 0, pops: [], mistake: null, result: null, game: null, questions: null, qIndex: 0, qState: null, quizPoints: 0, chapterDone: false };
     this.tracker = null;
     this.listen = null;
@@ -57,12 +57,20 @@ export class ReadGame {
     this.strictness = strictness;
     try {
       const paras = await api.get(`/api/game/paras?bookId=${book.id}&chapter=${chapter.idx}`);
-      this.readParas = new Set(paras);
+      this.readParas = new Map(paras.map((p) => [p.para, p.stars]));
       this.changed();
     } catch { /* без отметок */ }
   }
 
   updateChapter(chapter) { if (this.chapter?.idx === chapter.idx) this.chapter = chapter; }
+
+  /** Прохождение книги сброшено (из оглавления или библиотеки): игра останавливается, отметки исчезают. */
+  onReset(bookId) {
+    if (this.book?.id !== bookId) return;
+    this.stop();
+    this.readParas = new Map();
+    this.changed();
+  }
 
   paragraphs() {
     return [...new Set((this.chapter?.sentences || []).filter((x) => x.kind !== 'h').map((x) => x.para))];
@@ -260,7 +268,7 @@ export class ReadGame {
     this.stopListening();
     const para = this.s.para;
     const result = this.tracker.summary();
-    this.readParas.add(para);
+    this.readParas.set(para, Math.max(this.readParas.get(para) || 0, result.stars));
     this.set({ phase: 'result', result });
     try {
       const game = await api.post('/api/game/read', { bookId: this.book.id, chapter: this.chapter.idx, para, stats: result });
