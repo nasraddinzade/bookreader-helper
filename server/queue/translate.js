@@ -8,6 +8,7 @@ import { emit } from '../events.js';
 import { createProvider } from '../providers/index.js';
 import { matchResults, finalize, repairTokens } from '../gloss.js';
 import { kickDictionary } from './dictionary.js';
+import { subscriptionUsage } from '../providers/claude-code.js';
 
 const MAX_ATTEMPTS = 3;
 // Пачка ограничена и числом слов. В полном режиме модель пишет ~30 токенов на слово:
@@ -330,6 +331,7 @@ export function queueStatus() {
     paused: !!getSettings().translationPaused,
     provider: getSettings().provider,
     perMinute: perMin ? Math.round(perMin * 10) / 10 : null,
+    usage: subscriptionUsage(), // расход подписки Claude по последнему ответу CLI
     active: [...state.active.values()],
     books,
   };

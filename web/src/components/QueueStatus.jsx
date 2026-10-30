@@ -14,6 +14,7 @@ export function formatEta(min) {
 }
 
 const fmtTime = (ms) => new Date(ms).toLocaleTimeString('ru-RU', { hour: '2-digit', minute: '2-digit' });
+const fmtDateTime = (ms) => new Date(ms).toLocaleString('ru-RU', { day: 'numeric', month: 'short', hour: '2-digit', minute: '2-digit' });
 
 export default function QueueStatus({ bookId, compact = false }) {
   const [q, setQ] = useState(null);
@@ -43,9 +44,17 @@ export default function QueueStatus({ bookId, compact = false }) {
     text = `Переводится: осталось ${pending}${q.perMinute ? ` · ${q.perMinute}/мин` : ''}${eta ? ` · ${eta}` : ''}`;
   } else text = `В очереди ${pending}`;
 
+  // Расход подписки: CLI сообщает его в каждом ответе. Показываем, когда он заметный.
+  const u = q.usage;
+  const usageText = u?.utilization != null && (u.utilization >= 0.5 || /warning|rejected/.test(u.status))
+    ? `Подписка: ${u.type === 'seven_day' ? 'недельный' : u.type === 'five_hour' ? '5-часовой' : ''} лимит ${Math.round(u.utilization * 100)} %`
+      + (u.resetsAt ? `, сброс ${fmtDateTime(u.resetsAt)}` : '')
+    : '';
+
   return (
-    <span className={`queue-status ${cls}`} title={q.message || text}>
+    <span className={`queue-status ${cls}`} title={[q.message || text, usageText].filter(Boolean).join('\n')}>
       <span className="qs-text">{compact && text.length > 90 ? text.slice(0, 88) + '…' : text}</span>
+      {usageText && !compact && <span className={`qs-usage${u.utilization >= 0.8 ? ' warn' : ''}`}>{usageText}</span>}
       {(pending > 0 || q.paused) && (
         <button className="small" onClick={toggle} title={q.paused ? 'Продолжить перевод' : 'Поставить перевод на паузу'}>
           {q.paused ? '▶ Продолжить' : '⏸ Пауза'}

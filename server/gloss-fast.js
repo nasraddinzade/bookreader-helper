@@ -60,7 +60,9 @@ export function mapUnits(sentence, units, lang = 'en', tgt = 'ru') {
     if (target >= 0 && out.length) {
       const prev = out[out.length - 1];
       prev.en += (t.gap || '') + t.en;
-      prev.lemma = [prev.lemma, t.lemma].filter(Boolean).join(' ');
+      // Лемма блока: начальная форма первого слова + остальные слова как в тексте
+      // («got back to» → «get back to», «could have been» → «could have been»).
+      prev.lemma = [prev.lemma, norm(t.en)].filter(Boolean).join(' ');
       prev.multi = true;
       prev.hasVerb = prev.hasVerb || /verb/.test(t.pos);
       return;

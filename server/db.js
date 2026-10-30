@@ -156,7 +156,7 @@ export const DEFAULT_SETTINGS = {
   glossMode: 'fast', // fast — токены локально, модель даёт только переводы; full — модель размечает всё сама
   dictModel: 'haiku', // модель для словарных значений лемм
   batchSize: 40, // предложений в пачке (в режиме full — до 12)
-  parallel: 10, // одновременных запросов к claude -p (замер: 8 → ~2800 слов/мин)
+  parallel: 10, // одновременных запросов к claude -p (замер: ~8000 слов/мин на Sonnet 5.5)
   ollamaModel: 'qwen3:8b',
   ollamaThreads: 6,
   ttsEnabled: true,

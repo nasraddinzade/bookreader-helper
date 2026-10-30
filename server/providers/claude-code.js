@@ -20,6 +20,21 @@ const HARD_TIMEOUT_MS = 20 * 60 * 1000;
 fs.mkdirSync(WORK_DIR, { recursive: true });
 
 const active = new Set();
+
+// Расход подписки по последнему событию rate_limit_event от CLI: { type, utilization, resetsAt, status }.
+let usage = null;
+function noteRateLimit(info) {
+  usage = {
+    type: info.rateLimitType || '',
+    utilization: typeof info.utilization === 'number' ? info.utilization : null,
+    resetsAt: info.resetsAt ? info.resetsAt * 1000 : null,
+    status: info.status || '',
+    at: Date.now(),
+  };
+}
+export function subscriptionUsage() {
+  return usage;
+}
 export function killAllClaude() {
   for (const child of active) { try { child.kill(); } catch { /* уже завершён */ } }
 }
@@ -107,12 +122,15 @@ function runClaude(args, input, signal) {
     const hard = setTimeout(() => { killedFor = 'ответ дольше 20 минут'; child.kill(); }, HARD_TIMEOUT_MS);
     const onAbort = () => child.kill();
     signal?.addEventListener('abort', onAbort, { once: true });
+    // Порядок ключей в событиях меняется от версии к версии CLI, поэтому тип проверяется после разбора.
     const takeLine = (line) => {
       if (!line) return;
       lastLine = line;
-      if (line.startsWith('{"type":"result"')) {
-        try { result = JSON.parse(line); } catch { /* битая строка */ }
-      }
+      if (!line.includes('"result"') && !line.includes('"rate_limit_event"')) return;
+      let ev;
+      try { ev = JSON.parse(line); } catch { return; }
+      if (ev.type === 'result') result = ev;
+      else if (ev.type === 'rate_limit_event' && ev.rate_limit_info) noteRateLimit(ev.rate_limit_info);
     };
     child.stdout.on('data', (d) => {
       kick();
