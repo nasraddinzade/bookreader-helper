@@ -99,3 +99,44 @@ export function repairTokens(sentence, tokens) {
   }
   return tokensOut;
 }
+
+const words = (s) => String(s || '').toLowerCase().replace(/[‘’]/g, "'").replace(/[^\p{L}\p{N}'\s-]/gu, ' ').trim().split(/\s+/).filter(Boolean);
+const isEmptyGloss = (ctx) => !ctx || /^[–—+-]$/.test(String(ctx).trim());
+
+/**
+ * Склеивает выражения, которые модель разорвала по токенам: перевод и многословная лемма
+ * («I wonder» → «интересно») стоят на первом слове, а у остальных прочерк. Иначе у слова «I»
+ * в карточке оказывается перевод всей идиомы. Применяется при показе — исправляет и старые переводы.
+ */
+export function mergeSplitUnits(tokens) {
+  const out = [];
+  for (let i = 0; i < tokens.length; i++) {
+    const t = tokens[i];
+    const ew = words(t.en);
+    const lw = words(t.lemma);
+    if (ew.length && lw.length > ew.length) {
+      const rest = lw.slice(ew.length);
+      let n = 0; // сколько следующих токенов покрывают остаток леммы
+      let got = [];
+      while (got.length < rest.length && i + 1 + n < tokens.length) {
+        got = got.concat(words(tokens[i + 1 + n].en));
+        n++;
+      }
+      const follow = tokens.slice(i + 1, i + 1 + n);
+      if (n && got.length === rest.length && rest.every((w, k) => got[k] === w)) {
+        const ctx = [t, ...follow].map((x) => x.ctx).filter((c) => !isEmptyGloss(c)).join(' ');
+        out.push({
+          ...t,
+          en: t.en + follow.map((x) => (x.gap ?? ' ') + x.en).join(''),
+          ctx: ctx || t.ctx,
+          base: t.base || follow.find((x) => x.base)?.base || '',
+          pos: /phrasal|idiom/.test(t.pos) ? t.pos : 'idiom',
+        });
+        i += n;
+        continue;
+      }
+    }
+    out.push(t);
+  }
+  return out;
+}

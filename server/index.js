@@ -19,6 +19,7 @@ import { ollamaProvider } from './providers/ollama-gloss.js';
 import { killAllClaude } from './providers/claude-code.js';
 import { saveItem, findItem, keyFor, listItems, deleteItem, deleteExample, savedKeys, answer, exportJson, getItem } from './vocab.js';
 import { translateSelection, storeSelection } from './selection.js';
+import { wordMeanings } from './queue/dictionary.js';
 import { sentenceAudio, textAudio, ttsStatus, kickTts, resetAudio, stopTts, synth } from './tts/index.js';
 
 const app = Fastify({ logger: { level: 'warn' }, bodyLimit: 10 * 1024 * 1024 });
@@ -158,6 +159,9 @@ app.post('/api/vocab/:id/answer', async (req) => {
   emit('vocab', {});
   return item;
 });
+
+// Значения отдельных слов многословного блока (для карточки слова).
+app.get('/api/dict/words', async (req) => wordMeanings(req.query.lang || 'en', req.query.tgt || 'ru', String(req.query.text || '').slice(0, 200)));
 
 // ---- Перевод выделения -------------------------------------------------------
 

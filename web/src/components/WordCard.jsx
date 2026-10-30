@@ -1,6 +1,7 @@
 import { useEffect, useState } from 'react';
 import { speakText, speakSentence, useSpeakingId } from '../lib/tts.js';
 import { vocabApi, cleanCtx } from '../lib/vocab.js';
+import { api } from '../lib/api.js';
 
 const clean = (s) => String(s || '').replace(/^[^\p{L}\p{N}]+|[^\p{L}\p{N}]+$/gu, '');
 
@@ -16,6 +17,25 @@ export default function WordCard({ token, sentence, book, chapter, onClose }) {
     vocabApi.lookup('word', lang, clean(token.en), token.lemma).then((w) => { if (alive) setExisting(w); }).catch(() => {});
     return () => { alive = false; };
   }, [token, lang]);
+
+  // Многословный блок («I wonder», «went on»): показываем и значения отдельных слов.
+  const multi = clean(token.en).split(/\s+/).length > 1;
+  const [parts, setParts] = useState(null);
+  useEffect(() => {
+    if (!multi) return undefined;
+    let alive = true;
+    let tries = 0;
+    const load = () => api.get(`/api/dict/words?lang=${encodeURIComponent(lang)}&tgt=${encodeURIComponent(book.targetLang)}&text=${encodeURIComponent(clean(token.en))}`)
+      .then((r) => {
+        if (!alive) return;
+        setParts(r.items);
+        // Каких-то слов нет в словаре — они запрошены, подождём и спросим ещё раз.
+        if (r.pending && ++tries < 4) setTimeout(load, 6000);
+      })
+      .catch(() => {});
+    load();
+    return () => { alive = false; };
+  }, [token, lang, book.targetLang, multi]);
 
   const hasExample = existing?.examples?.some((e) => e.sentence === sentence.text);
 
@@ -64,6 +84,23 @@ export default function WordCard({ token, sentence, book, chapter, onClose }) {
           <dt>Начальная форма</dt><dd>{showLemma ? token.lemma : <span className="muted">{token.lemma || '—'}</span>}</dd>
           <dt>Словарь</dt><dd>{token.base || <span className="muted">—</span>}</dd>
         </dl>
+        {multi && (
+          <div className="card-parts">
+            <div className="card-parts-title">По словам</div>
+            {!parts ? <span className="muted small">…</span> : (
+              <ul>
+                {parts.map((p, i) => (
+                  <li key={i}>
+                    <button className={`icon${speakingId === `card-part-${i}` ? ' active' : ''}`} title="Прослушать" onClick={() => speakText(p.word, { id: `card-part-${i}`, lang })}>🔊</button>
+                    <b>{p.word}</b>
+                    {p.lemma && p.lemma !== p.word.toLowerCase() && <span className="muted"> → {p.lemma}</span>}
+                    <span> — {p.base || <span className="muted">значение загружается…</span>}</span>
+                  </li>
+                ))}
+              </ul>
+            )}
+          </div>
+        )}
         <div className="card-sentence">
           <button className={`icon${speakingId === 'card-sent' ? ' active' : ''}`} title="Прослушать предложение" onClick={() => speakSentence(sentence, { id: 'card-sent', lang })}>🔊</button>
           <div>

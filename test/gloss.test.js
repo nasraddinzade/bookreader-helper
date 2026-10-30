@@ -38,3 +38,29 @@ test('parseJsonResponse: неэкранированные кавычки в пе
   assert.equal(j.sentences[0].tokens[0].en, '“Oh!”');
   assert.match(j.sentences[0].full, /Ой!/);
 });
+
+test('mergeSplitUnits: разорванная идиома склеивается, текст не меняется', async () => {
+  const { mergeSplitUnits } = await import('../server/gloss.js');
+  const s = '“I wonder how many miles I’ve fallen,” and went on, at once.';
+  const toks = [
+    { en: '“I', gap: '', ctx: '«Интересно,', lemma: 'I wonder', base: 'интересно', pos: 'idiom' },
+    { en: 'wonder', gap: ' ', ctx: '–', lemma: 'wonder', base: '', pos: 'verb' },
+    { en: 'how', gap: ' ', ctx: 'сколько', lemma: 'how', base: '', pos: 'adv' },
+    { en: 'many', gap: ' ', ctx: '–', lemma: 'many', base: '', pos: 'adj' },
+    { en: 'miles', gap: ' ', ctx: 'миль', lemma: 'mile', base: '', pos: 'noun' },
+    { en: 'I’ve', gap: ' ', ctx: 'я', lemma: 'I have', base: '', pos: 'pron+aux' },
+    { en: 'fallen,”', gap: ' ', ctx: 'упал', lemma: 'fall', base: '', pos: 'verb' },
+    { en: 'and', gap: ' ', ctx: 'и', lemma: 'and', base: '', pos: 'conj' },
+    { en: 'went', gap: ' ', ctx: 'продолжала', lemma: 'go on', base: 'продолжать', pos: 'verb' },
+    { en: 'on,', gap: ' ', ctx: '–', lemma: 'on', base: '', pos: 'particle' },
+    { en: 'at', gap: ' ', ctx: '–', lemma: 'at once', base: 'сразу', pos: 'prep' },
+    { en: 'once.', gap: ' ', ctx: 'сразу', lemma: 'once', base: '', pos: 'adv' },
+  ];
+  const m = mergeSplitUnits(toks);
+  assert.equal(joinTokens(m), s);
+  assert.equal(m[0].en, '“I wonder');
+  assert.equal(m[0].ctx, '«Интересно,');
+  assert.equal(m.find((t) => t.en === 'went on,').ctx, 'продолжала');
+  assert.equal(m.find((t) => t.en === 'at once.').ctx, 'сразу');
+  assert.equal(m.find((t) => t.en === 'I’ve').en, 'I’ve'); // «I have» — не идиома через соседей
+});

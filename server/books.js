@@ -5,6 +5,7 @@ import path from 'node:path';
 import { db } from './db.js';
 import { BOOKS_DIR, AUDIO_DIR } from './config.js';
 import { fillBases } from './queue/dictionary.js';
+import { mergeSplitUnits } from './gloss.js';
 
 const stats = db.prepare(`
   SELECT book_id,
@@ -83,6 +84,7 @@ export function getChapter(bookId, idx) {
   const book = getBookRow(bookId);
   const sentences = chapterSentences.all(c.id).map((s) => {
     const gloss = s.gloss ? JSON.parse(s.gloss) : null;
+    if (gloss?.tokens) gloss.tokens = mergeSplitUnits(gloss.tokens);
     // Быстрый режим хранит переводы без словарных значений — они берутся из словаря лемм.
     if (gloss?.fast) {
       fillBases(book.lang, book.target_lang, gloss.tokens);

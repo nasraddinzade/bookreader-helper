@@ -5,6 +5,7 @@ import { db, getSettings } from '../db.js';
 import { emit } from '../events.js';
 import { claudeDictionary } from '../providers/claude-code.js';
 import { blocked } from './translate.js';
+import { analyze } from '../../shared/gloss-local.js';
 
 const BATCH = 150;
 const MAX_TRIES = 3;
@@ -69,4 +70,29 @@ export function dictBase(lang, tgt, lemma) {
 export function fillBases(lang, tgt, tokens) {
   for (const t of tokens) if (!t.base && t.lemma && t.pos !== 'name') t.base = dictBase(lang, tgt, t.lemma);
   return tokens;
+}
+
+const ensureLemma = db.prepare('INSERT OR IGNORE INTO lemma_dict (lang, tgt, lemma, base, at) VALUES (?, ?, ?, NULL, ?)');
+
+/**
+ * Значения отдельных слов многословного блока («I wonder» → I: я; wonder: интересоваться…).
+ * Слова, которых ещё нет в словаре, ставятся в очередь словаря; pending — их число.
+ */
+export function wordMeanings(lang, tgt, text) {
+  const items = [];
+  let pending = 0;
+  for (const t of analyze(text, lang, tgt)) {
+    if (!/\p{L}/u.test(t.en)) continue;
+    // Фразовый глагол compromise склеивает обратно — разбираем его на слова.
+    const parts = /\s/.test(t.en.trim()) ? analyze(t.en.replace(/\s+/g, ' . '), lang, tgt).filter((x) => /\p{L}/u.test(x.en)) : [t];
+    for (const p of parts) {
+      const lemma = (p.lemma || p.lower || '').toLowerCase();
+      let base = p.rule?.base || dictBase(lang, tgt, lemma);
+      if (!base && lemma && p.pos !== 'name') { ensureLemma.run(lang, tgt, lemma, Date.now()); pending++; }
+      if (p.pos === 'name') base = base || p.word;
+      items.push({ word: p.word, lemma, pos: p.pos, base });
+    }
+  }
+  if (pending) kickDictionary();
+  return { items, pending };
 }
