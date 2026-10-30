@@ -352,3 +352,11 @@ mark { background: var(--saved-bg); }
 .immersive-dock:hover, .immersive-dock:focus-within { opacity: 1; }
 .immersive-dock button { font-family: var(--font-display); letter-spacing: 0.04em; background: var(--paper); box-shadow: var(--shadow); }
 body.immersive .chapter-head { padding-top: 3rem; }
+
+/* В режимах «по наведению» и «скрыты» скрытая подсказка не расширяет слово:
+   она вынимается из потока, а высоту под неё держит отступ сверху — строки остаются на месте. */
+.mode-hover .tok, .mode-off .tok { padding-top: calc(0.56em * 1.1 + 0.02em); }
+.mode-hover .tok .g, .mode-off .tok .g {
+  position: absolute; top: 0; left: 50%; transform: translateX(-50%);
+  min-height: 0; white-space: nowrap; pointer-events: none;
+}
